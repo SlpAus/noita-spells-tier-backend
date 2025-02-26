@@ -24,9 +24,12 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+	// 配置静态文件路由
+	r.Static("/assets", "./assets")
 
 	routes.ItemRoutes(r.Group(""))
 	routes.VoteRoutes(r.Group(""))
+	routes.RankRoutes(r.Group(""))
 
 	r.Run(":4444")
 }
