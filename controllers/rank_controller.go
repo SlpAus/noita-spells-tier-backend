@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
 	"github.com/Qiuarctica/isaac-ranking-backend/models"
@@ -19,10 +20,33 @@ type Ranking struct {
 
 func GetRanking(c *gin.Context) {
 	var rankings []models.Item
-	Type := c.Query("type")
-	if Type == "item" {
-		database.DB.Order("win_rate desc").Find(&rankings)
+
+	startQualityStr := c.Query("startQuality")
+	endQualityStr := c.Query("endQuality")
+	canBeLostStr := c.Query("canBeLost")
+
+	startQuality, err := strconv.Atoi(startQualityStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "startQuality should be a number"})
+		return
 	}
+	endQuality, err := strconv.Atoi(endQualityStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "endQuality should be a number"})
+		return
+	}
+	canBeLost, err := strconv.ParseBool(canBeLostStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "canBeLost should be a boolean"})
+		return
+	}
+
+	query := database.DB.Where("quality BETWEEN ? AND ?", startQuality, endQuality)
+	if canBeLost {
+		query = query.Where("lost = ?", true)
+	}
+	// 以win_rate,score降序排列
+	query.Order("win_rate desc,score desc").Find(&rankings)
 
 	var rankingResponses []Ranking
 	for i, item := range rankings {

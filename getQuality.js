@@ -39,9 +39,20 @@ const get_name_quality = async (itemID) => {
         }
     });
 
+    // 提取是否能被Lost获取
+    let isLost = true;
+    $('a').each((index, element) => {
+        const text = $(element).text().trim();
+        if (text === "非游魂长子名分") {
+            isLost = false;
+            return false; // 退出循环
+        }
+    });
+
     return {
         quality: qualityText,
-        itemName: itemNameText
+        itemName: itemNameText,
+        lost: isLost
     };
 };
 
@@ -55,9 +66,9 @@ const main = async () => {
     for (const file of files) {
         const itemID = "c" + extractItemID(file);
         if (itemID) {
-            const { quality, itemName } = await get_name_quality(itemID);
-            console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName}`);
-            items.push({ id: itemID, name: itemName, quality });
+            const { quality, itemName, lost } = await get_name_quality(itemID);
+            console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName}, 是否能被Lost获取：${lost}`);
+            items.push({ id: itemID, name: itemName, quality, lost: lost });
         }
     }
 

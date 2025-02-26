@@ -17,6 +17,7 @@ type ItemInfo struct {
 	ID      string      `json:"id"`
 	Name    string      `json:"name"`
 	Quality interface{} `json:"quality"`
+	Lost    bool        `json:"lost"`
 }
 
 func main() {
@@ -24,7 +25,7 @@ func main() {
 	database.InitDB()
 
 	// 读取 items.json 文件
-	jsonFile, err := os.Open("./buildDB/items.json")
+	jsonFile, err := os.Open("./items.json")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,7 +96,8 @@ func main() {
 		Item.Score = 0
 		Item.Total = 0
 		Item.WinRate = 0
-		fmt.Println("道具ID:", Item.ItemID, "名称:", Item.Name, "图片URL:", Item.Url, "品质:", Item.Quality)
+		Item.Lost = itemInfo.Lost
+		fmt.Println("道具ID:", Item.ItemID, "名称:", Item.Name, "图片URL:", Item.Url, "品质:", Item.Quality, "是否能被Lost获取:", Item.Lost)
 		if err := database.DB.Create(&Item).Error; err != nil {
 			log.Fatal(err)
 		}

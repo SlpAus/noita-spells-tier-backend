@@ -11,6 +11,7 @@ type Item struct {
 	Score      float64 `json:"score"`                // 道具分数(获胜次数)
 	Total      float64 `json:"total"`                // 道具投票总数
 	WinRate    float64 `json:"winrate"`              // 道具获胜率
+	Lost       bool    `json:"lost"`                 // 能否被角色Lost获取
 }
 
 type ItemResponse struct {
