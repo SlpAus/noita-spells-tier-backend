@@ -45,8 +45,8 @@ func GetRanking(c *gin.Context) {
 	if canBeLost {
 		query = query.Where("lost = ?", true)
 	}
-	// 以win_rate,score降序排列
-	query.Order("win_rate desc,score desc").Find(&rankings)
+	// 以score , win_rate降序排列
+	query.Order("score desc,win_rate desc").Find(&rankings)
 
 	var rankingResponses []Ranking
 	for i, item := range rankings {

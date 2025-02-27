@@ -49,10 +49,16 @@ const get_name_quality = async (itemID) => {
         }
     });
 
+    // 提取道具描述
+    const description = $('div.i-gs-effect');
+    const descriptionText = description.length ? description.text() : "未找到道具描述";
+
+
     return {
         quality: qualityText,
         itemName: itemNameText,
-        lost: isLost
+        lost: isLost,
+        description: descriptionText
     };
 };
 
@@ -66,9 +72,9 @@ const main = async () => {
     for (const file of files) {
         const itemID = "c" + extractItemID(file);
         if (itemID) {
-            const { quality, itemName, lost } = await get_name_quality(itemID);
-            console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName}, 是否能被Lost获取：${lost}`);
-            items.push({ id: itemID, name: itemName, quality, lost: lost });
+            const { quality, itemName, lost, description } = await get_name_quality(itemID);
+            console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName}, 是否能被Lost获取：${lost},描述是：${description}`);
+            items.push({ id: itemID, name: itemName, quality, lost: lost, description: description });
         }
     }
 
@@ -80,7 +86,7 @@ const main = async () => {
 const test = async () => {
     const itemID = "c20";
     const { quality, itemName } = await get_name_quality(itemID);
-    console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName}`);
+    console.log(`道具 ${itemID} 的品质是 ${quality}，名称是 ${itemName},描述是 ${description}`);
 }
 
 main().catch(console.error);

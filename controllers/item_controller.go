@@ -10,13 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type GetItemsBody struct {
-	Num          uint `json:"num"`
-	StartQuality uint `json:"startQuality"`
-	EndQuality   uint `json:"endQuality"`
-	CanBeLost    bool `json:"canBeLost"`
-}
-
 func GetItems(c *gin.Context) {
 	// 从请求中获取参数
 	fmt.Println(c.Query("num"))
@@ -59,10 +52,11 @@ func GetItems(c *gin.Context) {
 	var itemResponses []models.ItemResponse
 	for _, item := range items {
 		itemResponses = append(itemResponses, models.ItemResponse{
-			ItemID:  item.ItemID,
-			Name:    item.Name,
-			Url:     item.Url,
-			Quality: item.Quality,
+			ItemID:     item.ItemID,
+			Name:       item.Name,
+			Url:        item.Url,
+			Quality:    item.Quality,
+			Descrption: item.Descrption,
 		})
 	}
 

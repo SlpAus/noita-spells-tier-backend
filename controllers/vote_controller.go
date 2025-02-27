@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
@@ -15,6 +16,20 @@ type VotingResult struct {
 	Loser  uint   `json:"loser"`
 }
 
+// 投票规则：score采用elo机制，胜率计算就是胜场/总场数
+
+var K float64 = 32
+
+func elo(winnerScore, loserScore float64) (float64, float64) {
+	var winnerExpect float64 = 1 / (1 + math.Pow(10, (loserScore-winnerScore)/400))
+	var loserExpect float64 = 1 / (1 + math.Pow(10, (winnerScore-loserScore)/400))
+
+	winnerScore += K * (1 - winnerExpect)
+	loserScore += K * (0 - loserExpect)
+
+	return winnerScore, loserScore
+}
+
 func SendVoting(c *gin.Context) {
 	var votingResult VotingResult
 	if err := c.ShouldBindJSON(&votingResult); err != nil {
@@ -23,35 +38,30 @@ func SendVoting(c *gin.Context) {
 	}
 	fmt.Println(votingResult)
 
-	// 更新胜利者的参数
 	var winnerItem models.Item
 	if err := database.DB.First(&winnerItem, "item_id = ?", votingResult.Winner).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "胜利者道具未找到"})
 		return
 	}
-	winnerItem.Score++
-	winnerItem.Total++
-	winnerItem.WinRate = winnerItem.Score / winnerItem.Total
 
-	// debug
-	fmt.Println(winnerItem)
-
-	database.DB.Save(&winnerItem)
-
-	// 更新失败者的参数
 	var loserItem models.Item
 	if err := database.DB.First(&loserItem, "item_id = ?", votingResult.Loser).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "失败者道具未找到"})
 		return
 	}
+
+	// 更新得分和胜率
+	winnerItem.Score, loserItem.Score = elo(winnerItem.Score, loserItem.Score)
+	winnerItem.WinRate = (winnerItem.WinRate*winnerItem.Total + 1) / (winnerItem.Total + 1)
+	loserItem.WinRate = (loserItem.WinRate * loserItem.Total) / (loserItem.Total + 1)
+	winnerItem.Total++
 	loserItem.Total++
-	loserItem.Score--
-	loserItem.WinRate = loserItem.Score / loserItem.Total
 
-	// debug
-	fmt.Println(loserItem)
-
+	database.DB.Save(&winnerItem)
 	database.DB.Save(&loserItem)
+
+	fmt.Println("投票结果:", winnerItem.Name, "得分:", winnerItem.Score, "胜率:", winnerItem.WinRate)
+	fmt.Println("投票结果:", loserItem.Name, "得分:", loserItem.Score, "胜率:", loserItem.WinRate)
 
 	c.JSON(http.StatusOK, gin.H{"message": "投票结果已保存"})
 }

@@ -12,11 +12,13 @@ type Item struct {
 	Total      float64 `json:"total"`                // 道具投票总数
 	WinRate    float64 `json:"winrate"`              // 道具获胜率
 	Lost       bool    `json:"lost"`                 // 能否被角色Lost获取
+	Descrption string  `json:"description"`          // 道具描述
 }
 
 type ItemResponse struct {
-	ItemID  uint   `json:"id"`
-	Name    string `json:"name"`
-	Url     string `json:"url"`
-	Quality uint   `json:"quality"`
+	ItemID     uint   `json:"id"`
+	Name       string `json:"name"`
+	Url        string `json:"url"`
+	Quality    uint   `json:"quality"`
+	Descrption string `json:"description"`
 }

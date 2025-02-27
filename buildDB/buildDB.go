@@ -14,14 +14,17 @@ import (
 )
 
 type ItemInfo struct {
-	ID      string      `json:"id"`
-	Name    string      `json:"name"`
-	Quality interface{} `json:"quality"`
-	Lost    bool        `json:"lost"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Quality    interface{} `json:"quality"`
+	Lost       bool        `json:"lost"`
+	Descrption string      `json:"description"`
 }
 
 func main() {
 	// 初始化数据库
+	exceptionList := []uint{626, 627, 238, 239, 550, 551, 668, 633, 327, 328}
+
 	database.InitDB()
 
 	// 读取 items.json 文件
@@ -64,6 +67,12 @@ func main() {
 		// 把字符串转换为数字
 		fmt.Sscanf(matches[1], "%d", &ItemID)
 
+		// 如果道具ID在例外列表中，则跳过
+		if contains(exceptionList, ItemID) {
+			fmt.Println("道具ID:", ItemID, "在例外列表中，跳过")
+			continue
+		}
+
 		itemID := "c" + matches[1]
 
 		// 查找对应的道具信息
@@ -97,7 +106,8 @@ func main() {
 		Item.Total = 0
 		Item.WinRate = 0
 		Item.Lost = itemInfo.Lost
-		fmt.Println("道具ID:", Item.ItemID, "名称:", Item.Name, "图片URL:", Item.Url, "品质:", Item.Quality, "是否能被Lost获取:", Item.Lost)
+		Item.Descrption = itemInfo.Descrption
+		fmt.Println("道具ID:", Item.ItemID, "名称:", Item.Name, "图片URL:", Item.Url, "品质:", Item.Quality, "是否能被Lost获取:", Item.Lost, "描述:", Item.Descrption)
 		if err := database.DB.Create(&Item).Error; err != nil {
 			log.Fatal(err)
 		}
@@ -116,4 +126,14 @@ func convertRomanToArabic(roman string) string {
 	}
 
 	return romanToArabic[strings.ToUpper(roman)]
+}
+
+// contains 检查切片中是否包含指定元素
+func contains(slice []uint, element uint) bool {
+	for _, v := range slice {
+		if v == element {
+			return true
+		}
+	}
+	return false
 }
