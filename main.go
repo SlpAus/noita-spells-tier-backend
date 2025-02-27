@@ -17,7 +17,8 @@ func main() {
 
 	// 配置 CORS 中间件
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"}, // 允许的前端地址
+		// AllowOrigins:     []string{"http://114.55.238.72:8088/"}, // 允许的前端地址
+		AllowOriginFunc:  func(origin string) bool { return true },
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -31,5 +32,5 @@ func main() {
 	routes.VoteRoutes(r.Group(""))
 	routes.RankRoutes(r.Group(""))
 
-	r.Run(":4444")
+	r.Run(":8080")
 }

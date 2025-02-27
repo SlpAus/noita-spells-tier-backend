@@ -21,10 +21,11 @@ func SendVoting(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
 		return
 	}
+	fmt.Println(votingResult)
 
 	// 更新胜利者的参数
 	var winnerItem models.Item
-	if err := database.DB.First(&winnerItem, votingResult.Winner).Error; err != nil {
+	if err := database.DB.First(&winnerItem, "item_id = ?", votingResult.Winner).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "胜利者道具未找到"})
 		return
 	}
@@ -39,7 +40,7 @@ func SendVoting(c *gin.Context) {
 
 	// 更新失败者的参数
 	var loserItem models.Item
-	if err := database.DB.First(&loserItem, votingResult.Loser).Error; err != nil {
+	if err := database.DB.First(&loserItem, "item_id = ?", votingResult.Loser).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "失败者道具未找到"})
 		return
 	}
