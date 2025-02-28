@@ -13,6 +13,8 @@ type Item struct {
 	WinRate    float64 `json:"winrate"`              // 道具获胜率
 	Lost       bool    `json:"lost"`                 // 能否被角色Lost获取
 	Descrption string  `json:"description"`          // 道具描述
+	WinCount   float64 `json:"wincount"`             // 获胜次数
+	Pools      []Pool  `gorm:"many2many:item_pools"`
 }
 
 type ItemResponse struct {
@@ -21,4 +23,5 @@ type ItemResponse struct {
 	Url        string `json:"url"`
 	Quality    uint   `json:"quality"`
 	Descrption string `json:"description"`
+	FilterNum  uint   `json:"filternum"` // 经过过滤后剩下的道具数量
 }
