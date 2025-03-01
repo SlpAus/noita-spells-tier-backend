@@ -83,6 +83,7 @@ func SendVoting(c *gin.Context) {
 	vote.Weight = weight
 	vote.IP = c.ClientIP()
 
+	fmt.Println("投票记录:", vote)
 	database.DB.Save(&vote)
 	database.DB.Save(&winnerItem)
 	database.DB.Save(&loserItem)

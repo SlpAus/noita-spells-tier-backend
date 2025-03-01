@@ -3,7 +3,6 @@ package controllers
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
 	"github.com/Qiuarctica/isaac-ranking-backend/models"
@@ -24,43 +23,13 @@ type Ranking struct {
 func GetRanking(c *gin.Context) {
 	var rankings []models.Item
 
-	startQualityStr := c.Query("startQuality")
-	endQualityStr := c.Query("endQuality")
-	canBeLostStr := c.Query("canBeLost")
-
-	startQuality, err := strconv.Atoi(startQualityStr)
+	query, err := applyFilters(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "startQuality should be a number"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	endQuality, err := strconv.Atoi(endQualityStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "endQuality should be a number"})
-		return
-	}
-	canBeLost, err := strconv.ParseBool(canBeLostStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "canBeLost should be a boolean"})
-		return
-	}
-	itemPoolsStr := c.Query("itemPools")
-	var itemPools []string
-	if itemPoolsStr != "" {
-		itemPools = strings.Split(itemPoolsStr, ",")
-	}
 
-	query := database.DB.Where("quality BETWEEN ? AND ?", startQuality, endQuality)
-	if canBeLost {
-		query = query.Where("lost = ?", true)
-	}
-
-	if len(itemPools) > 0 {
-		query = query.Joins("JOIN item_pools ON items.id = item_pools.item_id").
-			Joins("JOIN pools ON pools.id = item_pools.pool_id").
-			Where("pools.name IN ?", itemPools).
-			Select("DISTINCT  items.name, items.score, items.win_rate, items.total")
-	}
-
+	query = query.Select("DISTINCT  items.name, items.score, items.win_rate, items.total")
 	// 以score , win_rate降序排列
 	query.Order("score desc,win_rate desc").Find(&rankings)
 
@@ -81,4 +50,79 @@ func GetRanking(c *gin.Context) {
 
 	c.JSON(http.StatusOK, rankingResponses)
 
+}
+
+// 从全部的投票中获取某个道具和其他道具的对位数据
+// get /api/rank/getItemRank?itemID=XXX&itemPools=A,B,C...&startQuality=1&endQuality=2&canBeLost=true
+
+func GetItemRank(c *gin.Context) {
+	itemIDstr := c.Query("itemID")
+	if itemIDstr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "itemID should not be empty"})
+		return
+	}
+
+	itemID, err := strconv.Atoi(itemIDstr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "itemID should be a number"})
+		return
+	}
+
+	query, err := applyFilters(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	query = query.Distinct("items.id, items.item_id, items.name")
+	var filteredItems []models.Item
+	query.Find(&filteredItems)
+
+	var votes []models.Vote
+	database.DB.Where("winner = ? OR loser = ?", itemID, itemID).Find(&votes)
+
+	type ItemRank struct {
+		ItemID   uint    `json:"id"`
+		Name     string  `json:"name"`
+		Total    float64 `json:"total"`
+		WinCount float64 `json:"wincount"`
+		WinRate  float64 `json:"winrate"`
+	}
+
+	itemRanks := make(map[uint]*ItemRank)
+
+	for _, vote := range votes {
+		var otherItemID uint
+		var isWinner bool
+		if vote.Winner == uint(itemID) {
+			otherItemID = vote.Loser
+			isWinner = true
+		} else {
+			otherItemID = vote.Winner
+			isWinner = false
+		}
+
+		for _, filteredItem := range filteredItems {
+			if filteredItem.ItemID == otherItemID {
+				if _, exists := itemRanks[otherItemID]; !exists {
+					itemRanks[otherItemID] = &ItemRank{
+						ItemID: otherItemID,
+						Name:   filteredItem.Name,
+					}
+				}
+				itemRanks[otherItemID].Total += vote.Weight
+				if isWinner {
+					itemRanks[otherItemID].WinCount += vote.Weight
+				}
+				itemRanks[otherItemID].WinRate = itemRanks[otherItemID].WinCount / itemRanks[otherItemID].Total
+				break
+			}
+		}
+	}
+
+	var itemRankResponses []ItemRank
+	for _, itemRank := range itemRanks {
+		itemRankResponses = append(itemRankResponses, *itemRank)
+	}
+
+	c.JSON(http.StatusOK, itemRankResponses)
 }
