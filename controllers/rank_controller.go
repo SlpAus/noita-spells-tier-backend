@@ -44,7 +44,7 @@ func GetRanking(c *gin.Context) {
 		})
 	}
 	if len(rankingResponses) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "未找到道具"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "道具数量不足"})
 		return
 	}
 

@@ -16,7 +16,7 @@ func main() {
 
 	// 配置 CORS 中间件
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://114.55.238.72:8088", "http://localhost:3000", "http://vote.qiuy.cloud"}, // 允许的前端地址
+		AllowOrigins:     []string{"http://114.55.238.72:8088", "http://localhost:3000", "http://154.83.87.58", "http://vote.qiuy.cloud"}, // 允许的前端地址
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
