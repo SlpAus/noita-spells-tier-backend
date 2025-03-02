@@ -19,7 +19,7 @@ func InitDB() {
 	}
 
 	// 自动迁移（创建表）
-	err = DB.AutoMigrate(&models.Item{}, &models.Pool{}, &models.Vote{})
+	err = DB.AutoMigrate(&models.Item{}, &models.Pool{}, &models.Vote{}, &models.LastGetItem{})
 	if err != nil {
 		log.Fatal("数据表迁移失败:", err)
 	}

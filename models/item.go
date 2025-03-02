@@ -25,3 +25,11 @@ type ItemResponse struct {
 	Descrption string `json:"description"`
 	FilterNum  uint   `json:"filternum"` // 经过过滤后剩下的道具数量
 }
+
+type LastGetItem struct {
+	gorm.Model
+	UserID    string `json:"userid" gorm:"not null;index"` // 用户的cookie,用来指示用户
+	Left      uint   `json:"left"`
+	Right     uint   `json:"right"`
+	FilterNum uint   `json:"filternum"`
+}

@@ -113,7 +113,11 @@ func GetItemRank(c *gin.Context) {
 				if isWinner {
 					itemRanks[otherItemID].WinCount += vote.Weight
 				}
-				itemRanks[otherItemID].WinRate = itemRanks[otherItemID].WinCount / itemRanks[otherItemID].Total
+				if itemRanks[otherItemID].Total == 0 {
+					itemRanks[otherItemID].WinRate = 0
+				} else {
+					itemRanks[otherItemID].WinRate = itemRanks[otherItemID].WinCount / itemRanks[otherItemID].Total
+				}
 				break
 			}
 		}

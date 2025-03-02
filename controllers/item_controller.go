@@ -9,6 +9,7 @@ import (
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
 	"github.com/Qiuarctica/isaac-ranking-backend/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -99,7 +100,6 @@ func GetItems(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "道具数量不足,剩余道具数量:" + strconv.Itoa(FilterNum)})
 		return
 	}
-	fmt.Println(items)
 
 	var itemResponses []models.ItemResponse
 	for _, item := range items {
@@ -112,5 +112,26 @@ func GetItems(c *gin.Context) {
 			FilterNum:  uint(FilterNum),
 		})
 	}
+	userID, err := c.Cookie("user_id")
+	if err != nil {
+		// 如果不存在，生成一个新的 UUID 并设置 Cookie
+		userID = uuid.New().String()
+		c.SetCookie("user_id", userID, 3600*24*30, "/", "", false, true) // 一个月过期
+	}
+
+	if num == 2 {
+
+		// 储存上一次的道具
+		var lastGetItem models.LastGetItem
+		lastGetItem.UserID = userID
+		lastGetItem.Left = itemResponses[0].ItemID
+		lastGetItem.Right = itemResponses[1].ItemID
+		lastGetItem.FilterNum = uint(FilterNum)
+
+		// 替换上次储存的信息
+		database.DB.Where("user_id = ?", userID).Assign(lastGetItem).FirstOrCreate(&lastGetItem)
+
+	}
+
 	c.JSON(http.StatusOK, itemResponses)
 }
