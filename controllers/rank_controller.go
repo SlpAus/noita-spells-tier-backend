@@ -17,6 +17,14 @@ type Ranking struct {
 	Totals     float64 `json:"totals"`
 }
 
+type ItemRank struct {
+	ItemID   uint    `json:"id"`
+	Name     string  `json:"name"`
+	Total    float64 `json:"total"`
+	WinCount float64 `json:"wincount"`
+	WinRate  float64 `json:"winrate"`
+}
+
 // get /api/getRanking?type=XXX&startQuality=X&endQuality=X&canBeLost=X
 // &itemPools=X,Y,Z...
 
@@ -80,14 +88,6 @@ func GetItemRank(c *gin.Context) {
 	var votes []models.Vote
 	database.DB.Where("winner = ? OR loser = ?", itemID, itemID).Find(&votes)
 
-	type ItemRank struct {
-		ItemID   uint    `json:"id"`
-		Name     string  `json:"name"`
-		Total    float64 `json:"total"`
-		WinCount float64 `json:"wincount"`
-		WinRate  float64 `json:"winrate"`
-	}
-
 	itemRanks := make(map[uint]*ItemRank)
 
 	for _, vote := range votes {
@@ -110,7 +110,7 @@ func GetItemRank(c *gin.Context) {
 					}
 				}
 				itemRanks[otherItemID].Total += vote.Weight
-				if isWinner {
+				if isWinner && vote.Type != 1 {
 					itemRanks[otherItemID].WinCount += vote.Weight
 				}
 				if itemRanks[otherItemID].Total == 0 {
@@ -129,4 +129,73 @@ func GetItemRank(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, itemRankResponses)
+}
+
+func GetMyRank(c *gin.Context) {
+	// 获得自己IP的所有投票，生成个性化报告,例如投票是否符合总榜排名（计算符合总榜排名率，找出和总榜差距最大的vote），投票次数最多的道具等等
+
+	// 获得自己的所有投票
+	ip := c.ClientIP()
+	var votes []models.Vote
+	database.DB.Where("ip = ?", ip).Find(&votes)
+
+	// 分析投票次数最多的道具
+	itemVotes := make(map[uint]float64)
+	for _, vote := range votes {
+		itemVotes[vote.Winner] += vote.Weight
+		itemVotes[vote.Loser] += vote.Weight
+	}
+
+	var maxItemID uint
+	var maxItemVotes float64
+	for itemID, votes := range itemVotes {
+		if votes > maxItemVotes {
+			maxItemVotes = votes
+			maxItemID = itemID
+		}
+	}
+
+	// 获取总榜排名
+	var rankings []models.Item
+	database.DB.Order("score desc, win_rate desc").Find(&rankings)
+
+	// 生成总榜排名映射
+	rankingMap := make(map[uint]int)
+	for i, item := range rankings {
+		rankingMap[item.ItemID] = i + 1
+	}
+
+	// 计算符合总榜排名率和找出和总榜差距最大的vote
+	var totalVotes int
+	var matchingVotes int
+	var maxDifference int
+	var maxDifferenceVote models.Vote
+
+	for _, vote := range votes {
+		winnerRank := rankingMap[vote.Winner]
+		loserRank := rankingMap[vote.Loser]
+		if winnerRank < loserRank {
+			matchingVotes++
+		}
+		totalVotes++
+
+		difference := winnerRank - loserRank
+		if difference > maxDifference {
+			maxDifference = difference
+			maxDifferenceVote = vote
+		}
+	}
+
+	matchingRate := float64(matchingVotes) / float64(totalVotes)
+
+	// 返回个性化报告
+
+	c.JSON(http.StatusOK, gin.H{
+		"total_votes":      totalVotes,
+		"most_voted_item":  maxItemID,
+		"most_voted_times": maxItemVotes,
+		"matching_rate":    matchingRate,
+		"max_difference":   maxDifference,
+		"max_diff_vote":    maxDifferenceVote,
+	})
 }

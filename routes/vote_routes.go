@@ -7,4 +7,5 @@ import (
 
 func VoteRoutes(router *gin.RouterGroup) {
 	router.POST("/api/vote/sendVoting", controllers.SendVoting)
+	router.POST("/api/v1/vote/send", controllers.SendVotingResult)
 }

@@ -17,8 +17,18 @@ type IPVoteCount struct {
 func main() {
 	database.InitDB()
 
-	//查看有多少vote数据
-	var votes []models.Vote
-	database.DB.Find(&votes)
-	fmt.Println("votes count: ", len(votes))
+	// 打印vote表的大小
+	var voteCount int64
+	database.DB.Model(&models.Vote{}).Count(&voteCount)
+	fmt.Println("vote表大小:", voteCount)
+
+	// 从vote表中删除所有ip为120.244.146.65和111.25.241.9的记录
+	database.DB.Where("ip = ?", "120.244.146.65").Delete(&models.Vote{})
+	database.DB.Where("ip = ?", "111.25.241.9").Delete(&models.Vote{})
+
+	// 重新打印vote表的大小
+	database.DB.Model(&models.Vote{}).Count(&voteCount)
+	fmt.Println("vote表大小:", voteCount)
+
+	fmt.Println("删除完成")
 }

@@ -16,6 +16,13 @@ import (
 // get /api/item/getItems?num=X&startQuality=X&endQuality=X&canBeLost=X
 // &itemPools=X,Y,Z...
 
+// filters接口:
+// startQuality: 道具最低品质 0-4的数字
+// endQuality: 道具最高品质 0-4的数字
+// canBeLost: 是否被里lost筛选 true: 显示里lost可获得的道具 false: 显示所有道具
+// itemPools: 道具池筛选 以逗号分割的字符串
+// isActive: 是否是主动道具 0:显示全部 1:只显示主动 2:只显示被动
+
 func applyFilters(c *gin.Context) (*gorm.DB, error) {
 	startQualityStr := c.Query("startQuality")
 	startQuality, err := strconv.Atoi(startQualityStr)
@@ -41,11 +48,27 @@ func applyFilters(c *gin.Context) (*gorm.DB, error) {
 		itemPools = strings.Split(itemPoolsStr, ",")
 	}
 
+	isActivteStr := c.Query("isActive")
+	isActive, err := strconv.Atoi(isActivteStr)
+	if err != nil {
+		return nil, fmt.Errorf("isActive should be a number")
+	}
+
+	// 道具品质
 	query := database.DB.Where("quality BETWEEN ? AND ?", startQuality, endQuality)
+	// 里lost
 	if canBeLost {
 		query = query.Where("lost = ?", true)
 	}
 
+	// 主动道具 其中主动道具是道具描述中包含"使用后，"的道具
+	if isActive == 1 {
+		query = query.Where("descrption LIKE ?", "%使用后%")
+	} else if isActive == 2 {
+		query = query.Where("descrption NOT LIKE ?", "%使用后%")
+	}
+
+	// 道具池
 	if len(itemPools) > 0 {
 		query = query.Joins("JOIN item_pools ON items.id = item_pools.item_id").
 			Joins("JOIN pools ON pools.id = item_pools.pool_id").
@@ -116,7 +139,8 @@ func GetItems(c *gin.Context) {
 	if err != nil {
 		// 如果不存在，生成一个新的 UUID 并设置 Cookie
 		userID = uuid.New().String()
-		c.SetCookie("user_id", userID, 3600*24*30, "/", "", false, true) // 一个月过期
+		c.SetCookie("user_id", userID, 0, "/", "", false, true)
+
 	}
 
 	if num == 2 {
