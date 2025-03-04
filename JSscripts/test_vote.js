@@ -11,6 +11,6 @@ fetch("http://114.55.238.72:8080/api/v1/vote/send", {
         "Referrer-Policy": "strict-origin-when-cross-origin"
     },
     // winner: 628 loser : 111 filternum: 705
-    "body": "{\"type\":\"item\",\"winner\":628,\"loser\":154,\"filterNum\":705}",
+    "body": "{\"type\":\"item\",\"winner\":628,\"loser\":678,\"filterNum\":705}",
     "method": "POST"
 }).then(response => response.json()).then(data => console.log(data));
