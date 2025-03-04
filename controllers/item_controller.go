@@ -1,10 +1,12 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
 	"github.com/Qiuarctica/isaac-ranking-backend/models"
@@ -145,15 +147,26 @@ func GetItems(c *gin.Context) {
 
 	if num == 2 {
 
-		// 储存上一次的道具
-		var lastGetItem models.LastGetItem
-		lastGetItem.UserID = userID
-		lastGetItem.Left = itemResponses[0].ItemID
-		lastGetItem.Right = itemResponses[1].ItemID
-		lastGetItem.FilterNum = uint(FilterNum)
+		// 组装需缓存的数据
+		lastGetItem := models.LastGetItem{
+			UserID:    userID,
+			Left:      itemResponses[0].ItemID,
+			Right:     itemResponses[1].ItemID,
+			FilterNum: uint(FilterNum),
+		}
 
-		// 替换上次储存的信息
-		database.DB.Where("user_id = ?", userID).Assign(lastGetItem).FirstOrCreate(&lastGetItem)
+		// 将对象序列化为 JSON 字符串
+		data, err := json.Marshal(lastGetItem)
+		if err != nil {
+			fmt.Println("序列化 lastGetItem 失败：", err)
+		} else {
+			// 设置 Redis key，过期时间可根据需求调整(此处设置为 24 小时)
+			key := fmt.Sprintf("last_get_item:%s", userID)
+			err = database.Rdb.Set(database.Ctx, key, data, 24*time.Hour).Err()
+			if err != nil {
+				fmt.Println("保存到 Redis 失败：", err)
+			}
+		}
 
 	}
 

@@ -3,7 +3,6 @@ package main
 import (
 	"time"
 
-	"github.com/Qiuarctica/isaac-ranking-backend/controllers"
 	"github.com/Qiuarctica/isaac-ranking-backend/database"
 	"github.com/Qiuarctica/isaac-ranking-backend/routes"
 	"github.com/gin-contrib/cors"
@@ -15,20 +14,20 @@ func main() {
 	database.InitRedis()
 
 	// 定时任务，每分钟执行一次
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
+	// go func() {
+	// 	ticker := time.NewTicker(1 * time.Minute)
+	// 	defer ticker.Stop()
 
-		for range ticker.C {
-			controllers.ProcessVotes()
-		}
-	}()
+	// 	for range ticker.C {
+	// 		controllers.ProcessVotes()
+	// 	}
+	// }()
 
 	r := gin.Default()
 
 	// 配置 CORS 中间件
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://114.55.238.72:8088", "http://localhost:3000", "http://154.83.87.58", "https://vote.terras.su"}, // 允许的前端地址
+		AllowOrigins:     []string{"http://114.55.238.72:8088", "http://localhost:3000"}, // 允许的前端地址
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

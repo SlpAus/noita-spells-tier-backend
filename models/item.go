@@ -27,7 +27,6 @@ type ItemResponse struct {
 }
 
 type LastGetItem struct {
-	gorm.Model
 	UserID    string `json:"userid" gorm:"not null;index"` // 用户的cookie,用来指示用户
 	Left      uint   `json:"left"`
 	Right     uint   `json:"right"`

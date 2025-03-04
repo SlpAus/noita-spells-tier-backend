@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -25,7 +26,7 @@ const (
 )
 
 const (
-	VoteLimit  = 60              // 每个 IP 在时间窗口内的最大投票次数
+	VoteLimit  = 80              // 每个 IP 在时间窗口内的最大投票次数
 	VoteWindow = 1 * time.Minute // 时间窗口大小
 )
 
@@ -76,10 +77,18 @@ func SendVoting(c *gin.Context) {
 		return
 	}
 
+	// 从 Redis 中获取上一次 getItem 的缓存
 	var lastGetItem models.LastGetItem
-	if err := database.DB.First(&lastGetItem, "user_id = ?", userID).Error; err != nil {
-		fmt.Println("未找到上一次的道具:", err)
+	key := fmt.Sprintf("last_get_item:%s", userID)
+	data, err := database.Rdb.Get(database.Ctx, key).Result()
+	if err != nil {
+		fmt.Println("从Redis获取lastGetItem失败:", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "未找到上一次的道具"})
+		return
+	}
+	if err := json.Unmarshal([]byte(data), &lastGetItem); err != nil {
+		fmt.Println("解析Redis数据失败:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析上一次道具数据失败"})
 		return
 	}
 
@@ -95,6 +104,13 @@ func SendVoting(c *gin.Context) {
 		Loser = lastGetItem.Left
 	}
 	FilterNum = lastGetItem.FilterNum
+
+	// 删除上一次的 getItem 缓存
+	if err := database.Rdb.Del(database.Ctx, key).Err(); err != nil {
+		fmt.Println("无法删除上一次的道具缓存:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法删除上一次的道具缓存"})
+		return
+	}
 
 	var winnerItem models.Item
 	if err := database.DB.First(&winnerItem, "item_id = ?", Winner).Error; err != nil {
@@ -144,21 +160,39 @@ func SendVoting(c *gin.Context) {
 		Type = 1
 	}
 
-	// 将投票数据储存到 Redis
+	// 储存到数据库
 
-	voteData := map[string]interface{}{
-		"type":      Type,
-		"winner":    Winner,
-		"loser":     Loser,
-		"weight":    weight,
-		"ip":        ip,
-		"timestamp": time.Now().Unix(),
+	var vote models.Vote
+	vote.Winner = winnerItem.ItemID
+	vote.Loser = loserItem.ItemID
+	vote.Weight = weight
+	vote.IP = ip
+	vote.Type = Type
+
+	database.DB.Save(&vote)
+
+	// 更新items
+	if Type == 0 {
+		// 更新得分和胜率
+		winnerItem.Score, loserItem.Score = elo(winnerItem.Score, loserItem.Score, weight)
+		winnerItem.Total += weight
+		loserItem.Total += weight
+		winnerItem.WinCount += weight
+		winnerItem.WinRate = winnerItem.WinCount / winnerItem.Total
+		loserItem.WinRate = loserItem.WinCount / loserItem.Total
+	} else {
+		// 无人胜利
+		winnerItem.Total += weight
+		loserItem.Total += weight
+		winnerItem.WinRate = winnerItem.WinCount / winnerItem.Total
+		loserItem.WinRate = loserItem.WinCount / loserItem.Total
 	}
-	voteKey := fmt.Sprintf("vote:%s:%d", ip, time.Now().UnixNano())
-	if err := database.Rdb.HMSet(database.Ctx, voteKey, voteData).Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "无法存储投票数据"})
-		return
-	}
+
+	fmt.Println("投票结果:", winnerItem.Name, "得分:", winnerItem.Score, "胜率:", winnerItem.WinRate, "胜场:", winnerItem.WinCount, "总场次:", winnerItem.Total)
+	fmt.Println("投票结果:", loserItem.Name, "得分:", loserItem.Score, "胜率:", loserItem.WinRate, "胜场:", loserItem.WinCount, "总场次:", loserItem.Total)
+
+	database.DB.Save(&winnerItem)
+	database.DB.Save(&loserItem)
 	c.JSON(http.StatusOK, gin.H{"message": "投票结果已保存"})
 }
 
@@ -225,6 +259,12 @@ func ProcessVotes() {
 		return
 	}
 
+	var items []models.Item
+	if err := database.DB.Find(&items).Error; err != nil {
+		fmt.Println("无法获取道具数据:", err)
+		return
+	}
+
 	for _, key := range keys {
 		voteData, err := database.Rdb.HGetAll(database.Ctx, key).Result()
 		if err != nil {
@@ -237,15 +277,19 @@ func ProcessVotes() {
 		Weight := voteData["weight"]
 
 		var winnerItem models.Item
-		if err := database.DB.First(&winnerItem, "item_id = ?", Winner).Error; err != nil {
-			fmt.Println("胜利者道具未找到:", err)
-			continue
+		for _, item := range items {
+			if strconv.Itoa(int(item.ItemID)) == Winner {
+				winnerItem = item
+				break
+			}
 		}
 
 		var loserItem models.Item
-		if err := database.DB.First(&loserItem, "item_id = ?", Loser).Error; err != nil {
-			fmt.Println("失败者道具未找到:", err)
-			continue
+		for _, item := range items {
+			if strconv.Itoa(int(item.ItemID)) == Loser {
+				loserItem = item
+				break
+			}
 		}
 
 		weight, err := strconv.ParseFloat(Weight, 64)
@@ -278,22 +322,18 @@ func ProcessVotes() {
 
 		// 记录投票到数据库
 
-		var vote models.Vote
-		vote.Winner = winnerItem.ItemID
-		vote.Loser = loserItem.ItemID
-		vote.Weight = weight
-		vote.IP = voteData["ip"]
-		vote.Type = Type
-
 		fmt.Println("Winner:", winnerItem.Name, "得分:", winnerItem.Score, "胜率:", winnerItem.WinRate, "胜场:", winnerItem.WinCount, "总场次:", winnerItem.Total)
 		fmt.Println("Loser:", loserItem.Name, "得分:", loserItem.Score, "胜率:", loserItem.WinRate, "胜场:", loserItem.WinCount, "总场次:", loserItem.Total)
 
-		database.DB.Save(&vote)
-		database.DB.Save(&winnerItem)
-		database.DB.Save(&loserItem)
+		// database.DB.Save(&winnerItem)
+		// database.DB.Save(&loserItem)
 		// 删除投票数据
 		database.Rdb.Del(database.Ctx, key)
 	}
+
+	// 储存item
+	database.DB.Save(&items)
+
 	fmt.Println("所有投票数据已处理")
 
 }
