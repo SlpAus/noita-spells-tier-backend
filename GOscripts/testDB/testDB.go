@@ -102,5 +102,5 @@ func Total_vote() {
 
 func main() {
 	database.InitDB()
-	detect_loser_items(723)
+	detect_ip_vote("111.25.239.199")
 }

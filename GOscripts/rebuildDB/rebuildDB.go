@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	K          = 8
+	K          = 4
 	BasicScore = 1
 )
 

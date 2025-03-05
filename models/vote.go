@@ -11,3 +11,11 @@ type Vote struct {
 	IP     string  `json:"ip" gorm:"not null"`
 	Type   int     `json:"type"`
 }
+
+type Pvote struct {
+	gorm.Model
+	Winner      uint   `json:"winner"`
+	Loser       uint   `json:"loser"`
+	Description string `json:"description"`
+	IP          string `json:"ip"`
+}
