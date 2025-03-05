@@ -3,5 +3,4 @@ assets
 GOscripts
 JSscripts
 backups
-
-./ranking.db
+ranking.*
