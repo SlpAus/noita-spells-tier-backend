@@ -3,8 +3,8 @@ package main
 import (
 	"time"
 
-	"github.com/Qiuarctica/isaac-ranking-backend/database"
-	"github.com/Qiuarctica/isaac-ranking-backend/routes"
+	"github.com/SlpAus/noita-spells-tier-backend/database"
+	"github.com/SlpAus/noita-spells-tier-backend/routes"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )

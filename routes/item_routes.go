@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"github.com/Qiuarctica/isaac-ranking-backend/controllers"
+	"github.com/SlpAus/noita-spells-tier-backend/controllers"
 	"github.com/gin-gonic/gin"
 )
 

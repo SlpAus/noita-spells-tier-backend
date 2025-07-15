@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Qiuarctica/isaac-ranking-backend/models"
+	"github.com/SlpAus/noita-spells-tier-backend/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

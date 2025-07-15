@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Qiuarctica/isaac-ranking-backend/database"
-	"github.com/Qiuarctica/isaac-ranking-backend/models"
+	"github.com/SlpAus/noita-spells-tier-backend/database"
+	"github.com/SlpAus/noita-spells-tier-backend/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
