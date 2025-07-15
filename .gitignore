@@ -4,3 +4,7 @@ GOscripts
 JSscripts
 backups
 ranking.*
+
+# VSCode files
+.vscode/
+.history/
