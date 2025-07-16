@@ -1,10 +1,9 @@
-package controllers
+package spell
 
 import (
 	"fmt"
 	"net/http"
 
-	"github.com/SlpAus/noita-spells-tier-backend/services"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,7 +32,7 @@ type SpellImageResponse struct {
 }
 
 // --- 数据格式化辅助函数 (现在使用 services DTOs) ---
-func formatForRanking(dto services.RankedSpellDTO, c *gin.Context) RankingSpellResponse {
+func formatForRanking(dto RankedSpellDTO, c *gin.Context) RankingSpellResponse {
 	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, dto.Info.Sprite)
 	return RankingSpellResponse{
 		ID:       dto.ID,
@@ -45,7 +44,7 @@ func formatForRanking(dto services.RankedSpellDTO, c *gin.Context) RankingSpellR
 		Win:      dto.Stats.Win,
 	}
 }
-func formatForImage(dto services.SpellImageDTO, c *gin.Context) SpellImageResponse {
+func formatForImage(dto SpellImageDTO, c *gin.Context) SpellImageResponse {
 	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, dto.Info.Sprite)
 	return SpellImageResponse{
 		ID:       dto.ID,
@@ -58,7 +57,7 @@ func formatForImage(dto services.SpellImageDTO, c *gin.Context) SpellImageRespon
 
 // GetRanking 获取法术排行榜
 func GetRanking(c *gin.Context) {
-	rankedSpells, err := services.GetRankedSpells()
+	rankedSpells, err := GetRankedSpells()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取排行榜数据失败: " + err.Error()})
 		return
@@ -74,7 +73,7 @@ func GetRanking(c *gin.Context) {
 // GetSpellByID 根据ID获取单个法术的信息
 func GetSpellByID(c *gin.Context) {
 	spellID := c.Param("id")
-	spellDTO, err := services.GetSpellImageInfoByID(spellID)
+	spellDTO, err := GetSpellImageInfoByID(spellID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库查询失败: " + err.Error()})
 		return

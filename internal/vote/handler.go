@@ -1,12 +1,12 @@
-package controllers
+package vote
 
 import (
 	"errors"
 	"math"
 	"net/http"
 
-	"github.com/SlpAus/noita-spells-tier-backend/database"
-	"github.com/SlpAus/noita-spells-tier-backend/models"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause" // *** 新增的导入语句 ***
@@ -16,7 +16,7 @@ import (
 type VoteRequestBody struct {
 	SpellA_ID string             `json:"spell_a_id" binding:"required"`
 	SpellB_ID string             `json:"spell_b_id" binding:"required"`
-	Result    models.VoteResult  `json:"result" binding:"required"`
+	Result    VoteResult  `json:"result" binding:"required"`
 	// UserIdentifier 暂时不用，为后续阶段做准备
 	// UserIdentifier string          `json:"user_identifier"`
 }
@@ -53,7 +53,7 @@ func SubmitVote(c *gin.Context) {
 	// 2. 使用数据库事务来保证数据一致性
 	// GORM的Transaction会确保内部的所有数据库操作要么全部成功，要么全部失败回滚。
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var spellA, spellB models.Spell
+		var spellA, spellB spell.Spell
 
 		// 在事务中查询两个法术，使用Clauses(clause.Locking{Strength: "UPDATE"})来锁定行，防止并发问题
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("spell_id = ?", body.SpellA_ID).First(&spellA).Error; err != nil {
@@ -65,20 +65,20 @@ func SubmitVote(c *gin.Context) {
 
 		// 3. 根据投票结果，更新分数和场次
 		switch body.Result {
-		case models.ResultAWins:
+		case ResultAWins:
 			spellA.Score, spellB.Score = calculateElo(spellA.Score, spellB.Score)
 			spellA.Win++
 			spellA.Total++
 			spellB.Total++
-		case models.ResultBWins:
+		case ResultBWins:
 			spellB.Score, spellA.Score = calculateElo(spellB.Score, spellA.Score)
 			spellB.Win++
 			spellB.Total++
 			spellA.Total++
-		case models.ResultDraw:
+		case ResultDraw:
 			spellA.Total++
 			spellB.Total++
-		case models.ResultSkip:
+		case ResultSkip:
 			// 跳过，不更新任何分数和场次
 		default:
 			return errors.New("无效的投票结果")
@@ -93,7 +93,7 @@ func SubmitVote(c *gin.Context) {
 		}
 
 		// 5. 创建并保存一条新的投票记录
-		newVote := models.Vote{
+		newVote := Vote{
 			SpellA_ID: body.SpellA_ID,
 			SpellB_ID: body.SpellB_ID,
 			Result:    body.Result,

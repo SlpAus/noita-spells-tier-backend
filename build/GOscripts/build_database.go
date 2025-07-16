@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/SlpAus/noita-spells-tier-backend/database"
-	"github.com/SlpAus/noita-spells-tier-backend/models"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 
 	"gorm.io/gorm"
 )
@@ -61,7 +61,7 @@ func loadTranslations(filePath string) (map[string]string, error) {
 }
 
 // preprocessSpells 是核心处理函数
-func preprocessSpells() ([]CleanSpell, []models.Spell, error) {
+func preprocessSpells() ([]CleanSpell, []spell.Spell, error) {
 	translations, err := loadTranslations("./assets/data/translations/common.csv")
 	if err != nil {
 		return nil, nil, err
@@ -79,7 +79,7 @@ func preprocessSpells() ([]CleanSpell, []models.Spell, error) {
 	fmt.Println("成功读取", len(rawSpells), "条原始法术数据。")
 
 	var cleanSpells []CleanSpell
-	var dbSpells []models.Spell
+	var dbSpells []spell.Spell
 	for _, rawSpell := range rawSpells {
 		nameKey := strings.TrimPrefix(rawSpell.Name, "$")
 		descKey := strings.TrimPrefix(rawSpell.Description, "$")
@@ -104,7 +104,7 @@ func preprocessSpells() ([]CleanSpell, []models.Spell, error) {
 		}
 		cleanSpells = append(cleanSpells, cleanSpell)
 
-		dbSpell := models.Spell{
+		dbSpell := spell.Spell{
 			SpellID:     rawSpell.ID,
 			Name:        nameCN,
 			Description: descCN,
@@ -139,7 +139,7 @@ func buildDatabase() {
 	}
 
 	database.InitDB()
-	database.DB.AutoMigrate(&models.Spell{})
+	database.DB.AutoMigrate(&spell.Spell{})
 	database.DB.Exec("DELETE FROM spells")
 
 	result := database.DB.Create(&dbSpells)
@@ -158,7 +158,7 @@ func cleanDatabase() {
 	// *** 修改部分开始 ***
 	// GORM 默认开启了安全模式，不允许在没有 WHERE 条件的情况下进行全局更新。
 	// 我们需要通过 .Session(&gorm.Session{AllowGlobalUpdate: true}) 显式地允许全局更新来重置所有记录。
-	result := database.DB.Model(&models.Spell{}).
+	result := database.DB.Model(&spell.Spell{}).
 		Session(&gorm.Session{AllowGlobalUpdate: true}).
 		Updates(map[string]interface{}{
 			"score": 1500,

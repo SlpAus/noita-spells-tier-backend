@@ -1,10 +1,10 @@
-package services
+package spell
 
 import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/SlpAus/noita-spells-tier-backend/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -29,7 +29,7 @@ type SpellImageDTO struct {
 // GetRankedSpells 从Redis中获取完整的、已排序的法术列表
 func GetRankedSpells() ([]RankedSpellDTO, error) {
 	// 1. 从Sorted Set获取所有法术ID，按分数从高到低排序
-	spellIDs, err := database.RDB.ZRevRange(database.Ctx, SpellRankingKey, 0, -1).Result()
+	spellIDs, err := database.RDB.ZRevRange(database.Ctx, RankingKey, 0, -1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("无法从Redis获取排行榜ID: %w", err)
 	}
@@ -39,8 +39,8 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 
 	// 2. 使用Pipeline一次性获取所有法术的静态和动态数据
 	pipe := database.RDB.Pipeline()
-	infoCmd := pipe.HMGet(database.Ctx, SpellInfoKey, spellIDs...)
-	statsCmd := pipe.HMGet(database.Ctx, SpellStatsKey, spellIDs...)
+	infoCmd := pipe.HMGet(database.Ctx, InfoKey, spellIDs...)
+	statsCmd := pipe.HMGet(database.Ctx, StatsKey, spellIDs...)
 	if _, err := pipe.Exec(database.Ctx); err != nil {
 		return nil, fmt.Errorf("执行Redis Pipeline失败: %w", err)
 	}
@@ -70,7 +70,7 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 // GetSpellImageInfoByID 从Redis中获取单个法术的图片所需信息
 func GetSpellImageInfoByID(spellID string) (*SpellImageDTO, error) {
 	// 1. 从Hash中获取静态数据
-	infoJSON, err := database.RDB.HGet(database.Ctx, SpellInfoKey, spellID).Result()
+	infoJSON, err := database.RDB.HGet(database.Ctx, InfoKey, spellID).Result()
 	if err == redis.Nil {
 		return nil, nil // 未找到
 	}

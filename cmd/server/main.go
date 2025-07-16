@@ -3,24 +3,24 @@ package main
 import (
 	"time"
 
-	"github.com/SlpAus/noita-spells-tier-backend/database"
-	"github.com/SlpAus/noita-spells-tier-backend/routes"
-	"github.com/SlpAus/noita-spells-tier-backend/services"
-	"github.com/SlpAus/noita-spells-tier-backend/utils" // *** 新增导入 ***
+	"github.com/SlpAus/noita-spells-tier-backend/api"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
+	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	// *** 新增调用：在所有操作之前生成密钥 ***
-	utils.GenerateSecretKey()
+	token.GenerateSecretKey()
 
 	// 1. 初始化数据库连接
 	database.InitDB()
 	database.InitRedis()
 
 	// 2. 执行应用启动初始化流程
-	services.InitializeApplication(true)
+	startup.InitializeApplication(true)
 
 	// 3. 创建Gin引擎
 	r := gin.Default()
@@ -40,7 +40,7 @@ func main() {
 	r.Static("/images/borders", "./assets/spell_borders")
 
 	// 6. 注册API路由
-	routes.SetupRoutes(r)
+	api.SetupRoutes(r)
 
 	// TODO: 在这里设置优雅停机和后台定时任务
 

@@ -1,4 +1,4 @@
-package models
+package spell
 
 import "gorm.io/gorm"
 
