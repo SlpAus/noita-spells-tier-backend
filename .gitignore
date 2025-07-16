@@ -1,9 +1,5 @@
-node_modules
 assets
-GOscripts
-JSscripts
-backups
-ranking.*
+*.db
 
 # VSCode files
 .vscode/
