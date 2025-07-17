@@ -8,14 +8,6 @@ import (
 )
 
 // --- API响应模型 (不变) ---
-type SpellPairResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	ImageURL    string `json:"imageUrl"`
-	Type        int    `json:"type"`
-	Rank        int64  `json:"rank"`
-}
 type RankingSpellResponse struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`
@@ -29,6 +21,19 @@ type SpellImageResponse struct {
 	ID       string `json:"id"`
 	ImageURL string `json:"imageUrl"`
 	Type     int    `json:"type"`
+}
+type GetPairAPIResponse struct {
+	SpellA    SpellPairResponse `json:"spellA"`
+	SpellB    SpellPairResponse `json:"spellB"`
+	PairID    string            `json:"pairId"`
+	Signature string            `json:"signature"`
+}
+type SpellPairResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ImageURL    string `json:"imageUrl"`
+	Type        int    `json:"type"`
 }
 
 // --- 数据格式化辅助函数 (现在使用 services DTOs) ---
@@ -50,6 +55,16 @@ func formatForImage(dto SpellImageDTO, c *gin.Context) SpellImageResponse {
 		ID:       dto.ID,
 		ImageURL: imageURL,
 		Type:     dto.Info.Type,
+	}
+}
+func formatForPair(spellID string, info SpellInfo, c *gin.Context) SpellPairResponse {
+	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, info.Sprite)
+	return SpellPairResponse{
+		ID:          spellID,
+		Name:        info.Name,
+		Description: info.Description,
+		ImageURL:    imageURL,
+		Type:        info.Type,
 	}
 }
 
@@ -87,6 +102,34 @@ func GetSpellByID(c *gin.Context) {
 
 // GetSpellPair 获取一对用于对战的法术
 func GetSpellPair(c *gin.Context) {
-	// TODO: 迁移此函数的逻辑到 services 层，并实现高级匹配算法
-	c.JSON(http.StatusOK, gin.H{"message": "GetSpellPair endpoint is working!"})
+	// 1. 解析可选的查询参数
+	excludeA := c.Query("excludeA")
+	excludeB := c.Query("excludeB")
+
+	// 2. 验证参数：要么都没有，要么都有
+	if (excludeA != "" && excludeB == "") || (excludeA == "" && excludeB != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "必须同时提供 excludeA 和 excludeB，或都不提供"})
+		return
+	}
+
+	// 3. 调用服务层获取法术对和签名
+	responseDTO, err := GetNewSpellPair(excludeA, excludeB)
+	if err != nil {
+		if err.Error() == "数据库中法术数量不足" || err.Error() == "排除后剩余法术数量不足" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "获取法术对失败: " + err.Error()})
+		}
+		return
+	}
+
+	// 4. 将服务层返回的DTO格式化为最终的API响应
+	apiResponse := GetPairAPIResponse{
+		SpellA:    formatForPair(responseDTO.Payload.SpellAID, responseDTO.SpellAInfo, c),
+		SpellB:    formatForPair(responseDTO.Payload.SpellBID, responseDTO.SpellBInfo, c),
+		PairID:    responseDTO.Payload.PairID,
+		Signature: responseDTO.Signature,
+	}
+
+	c.JSON(http.StatusOK, apiResponse)
 }

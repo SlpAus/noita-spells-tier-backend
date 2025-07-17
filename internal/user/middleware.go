@@ -24,7 +24,7 @@ func EnsureUserCookieMiddleware() gin.HandlerFunc {
 		// 尝试从请求头中获取Cookie
 		userID, err := c.Cookie(CookieName)
 
-		if err != nil || userID == "" {
+		if err != nil {
 			if err != http.ErrNoCookie {
 				fmt.Printf("获取用户Cookie时发生错误: %v\n", err)
 			}

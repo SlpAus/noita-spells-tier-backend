@@ -2,10 +2,14 @@ package spell
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math/rand"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 )
 
 // --- Service-Level Data Transfer Objects (DTOs) ---
@@ -22,6 +26,15 @@ type RankedSpellDTO struct {
 type SpellImageDTO struct {
 	ID   string
 	Info SpellInfo
+}
+
+// PairDataDTO 是 GetNewSpellPair 服务返回给控制器的最终数据包。
+// 它包含了生成API响应所需的所有原始信息。
+type PairDataDTO struct {
+	SpellAInfo SpellInfo
+	SpellBInfo SpellInfo
+	Payload    token.TokenPayload
+	Signature  string
 }
 
 // --- Service Functions ---
@@ -86,5 +99,74 @@ func GetSpellImageInfoByID(spellID string) (*SpellImageDTO, error) {
 	return &SpellImageDTO{
 		ID:   spellID,
 		Info: info,
+	}, nil
+}
+
+// GetNewSpellPair 是获取法术对的核心业务逻辑
+func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
+	// 1. 从Redis的排名表(Sorted Set)中获取所有法术ID
+	allSpellIDs, err := database.RDB.ZRange(database.Ctx, RankingKey, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("无法从Redis获取所有法术ID: %w", err)
+	}
+	if len(allSpellIDs) < 2 {
+		return nil, errors.New("数据库中法术数量不足")
+	}
+
+	// 2. 创建一个可供抽样的ID列表，并排除指定的法术
+	selectableIDs := make([]string, 0, len(allSpellIDs))
+	excludeMap := map[string]bool{excludeA: true, excludeB: true}
+	for _, id := range allSpellIDs {
+		if !excludeMap[id] {
+			selectableIDs = append(selectableIDs, id)
+		}
+	}
+	if len(selectableIDs) < 2 {
+		return nil, errors.New("排除后剩余法术数量不足")
+	}
+
+	// 3. 简单随机抽样：打乱列表并取前两个
+	// Go 1.20+版本后，rand.Seed已无需手动调用
+	rand.Shuffle(len(selectableIDs), func(i, j int) {
+		selectableIDs[i], selectableIDs[j] = selectableIDs[j], selectableIDs[i]
+	})
+	selectedIDs := selectableIDs[:2]
+	idA, idB := selectedIDs[0], selectedIDs[1]
+
+	// 4. 使用Pipeline批量获取这两个法术的静态信息(SpellInfo)
+	pipe := database.RDB.Pipeline()
+	infoACmd := pipe.HGet(database.Ctx, InfoKey, idA)
+	infoBCmd := pipe.HGet(database.Ctx, InfoKey, idB)
+	_, err = pipe.Exec(database.Ctx)
+	if err != nil {
+		return nil, fmt.Errorf("无法从Redis批量获取法术对数据: %w", err)
+	}
+
+	// 5. 解析数据
+	var infoA, infoB SpellInfo
+	_ = json.Unmarshal([]byte(infoACmd.Val()), &infoA)
+	_ = json.Unmarshal([]byte(infoBCmd.Val()), &infoB)
+
+	// 6. 生成PairID和签名
+	pairID, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("无法生成PairID: %w", err)
+	}
+	payload := token.TokenPayload{
+		PairID:   pairID.String(),
+		SpellAID: idA,
+		SpellBID: idB,
+	}
+	signature, err := token.GenerateVoteSignature(payload)
+	if err != nil {
+		return nil, fmt.Errorf("无法生成投票签名: %w", err)
+	}
+
+	// 7. 组合最终的响应DTO
+	return &PairDataDTO{
+		SpellAInfo: infoA,
+		SpellBInfo: infoB,
+		Payload:    payload,
+		Signature:  signature,
 	}, nil
 }
