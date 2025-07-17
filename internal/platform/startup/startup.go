@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user" // *** 新增导入 ***
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
-	// "github.com/SlpAus/noita-spells-tier-backend/internal/user" // for future use
 )
 
 // InitializeApplication 是应用启动时执行的总入口
@@ -23,7 +23,10 @@ func InitializeApplication(flushCache bool) {
 		panic(err)
 	}
 
-	// if err := user.WarmupCache(); err != nil { ... } // 未来扩展
+	// *** 新增调用 ***
+	if err := user.PrimeCachedDB(); err != nil {
+		panic(err)
+	}
 
 	fmt.Println("应用初始化完成！")
 }
