@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/SlpAus/noita-spells-tier-backend/api"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-contrib/cors"
@@ -12,20 +14,26 @@ import (
 )
 
 func main() {
-	// *** 新增调用：在所有操作之前生成密钥 ***
 	token.GenerateSecretKey()
-
-	// 1. 初始化数据库连接
 	database.InitDB()
 	database.InitRedis()
 
-	// 2. 执行应用启动初始化流程
-	startup.InitializeApplication(true)
+	// 1. *** 新增：阻塞式获取初始Run ID ***
+	health.InitializeRunID()
 
-	// 3. 创建Gin引擎
+	// 2. 执行应用首次启动初始化流程
+	if err := startup.InitializeApplication(); err != nil {
+		panic(fmt.Sprintf("应用初始化失败，无法启动: %v", err))
+	}
+
+	// 3. *** 新增：阻塞式执行一次启动后健康检查 ***
+	fmt.Println("正在执行启动后健康检查...")
+	health.PerformCheck()
+
+	// 4. 异步启动后台的持续健康检查器
+	go health.StartRedisHealthCheck()
+
 	r := gin.Default()
-
-	// 4. 配置CORS中间件
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
@@ -35,18 +43,15 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// 5. 配置静态文件路由
 	r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
 	r.Static("/images/borders", "./assets/spell_borders")
 
-	// 6. 注册API路由
 	api.SetupRoutes(r)
 
 	// TODO: 在这里设置优雅停机和后台定时任务
 
-	// 7. 启动服务器
-	err := r.Run(":8080")
-	if err != nil {
+	fmt.Println("服务器已准备就绪，开始监听 :8080")
+	if err := r.Run(":8080"); err != nil {
 		panic("Failed to start server: " + err.Error())
 	}
 }

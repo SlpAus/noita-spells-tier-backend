@@ -4,29 +4,41 @@ import (
 	"fmt"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/user" // *** 新增导入 ***
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
 )
 
-// InitializeApplication 是应用启动时执行的总入口
-func InitializeApplication(flushCache bool) {
-	fmt.Println("开始应用初始化...")
+// InitializeApplication 是应用首次启动时执行的总入口
+func InitializeApplication() error {
+	fmt.Println("开始应用首次初始化...")
 
-	// TODO: 在这里实现从metadata表检查上次是否正常退出的逻辑
-
-	// 调用各个模块自己的初始化函数
+	// 首次启动时，我们需要迁移数据库并预热缓存
 	if err := spell.PrimeCachedDB(); err != nil {
-		panic(err)
+		return err
 	}
-
 	if err := vote.PrimeDB(); err != nil {
-		panic(err)
+		return err
 	}
-
-	// *** 新增调用 ***
 	if err := user.PrimeCachedDB(); err != nil {
-		panic(err)
+		return err
 	}
-
+	
 	fmt.Println("应用初始化完成！")
+	return nil
+}
+
+// RebuildCache 是一个专门用于在运行时热重建Redis缓存的函数
+func RebuildCache() error {
+	fmt.Println("开始缓存热重建...")
+
+	// 热重建时，我们只执行缓存预热，不执行数据库迁移
+	if err := spell.WarmupCache(); err != nil {
+		return err
+	}
+	if err := user.WarmupCache(); err != nil {
+		return err
+	}
+	
+	fmt.Println("缓存热重建完成！")
+	return nil
 }

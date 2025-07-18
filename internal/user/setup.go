@@ -15,8 +15,8 @@ func migrateDB() error {
 	return nil
 }
 
-// warmupCache 从SQLite加载所有已知的用户UUID，并预热到Redis的Set中
-func warmupCache() error {
+// WarmupCache 从SQLite加载所有已知的用户UUID，并预热到Redis的Set中
+func WarmupCache() error {
 	var users []User
 	// 1. 从SQLite读取所有用户的UUID
 	if err := database.DB.Select("uuid").Find(&users).Error; err != nil {
@@ -55,7 +55,7 @@ func PrimeCachedDB() error {
 	if err := migrateDB(); err != nil {
 		return err
 	}
-	if err := warmupCache(); err != nil {
+	if err := WarmupCache(); err != nil {
 		return err
 	}
 	return nil
