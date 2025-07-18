@@ -64,7 +64,7 @@ func SubmitVote(c *gin.Context) {
 			userID = "" // 如果时间戳不合法，视为匿名用户
 		}
 	}
-
+/*
 	if userID != "" {
 		if err := user.ActivateUser(userID); err != nil {
 			fmt.Printf("激活用户 %s 失败: %v\n", userID, err)
@@ -72,7 +72,7 @@ func SubmitVote(c *gin.Context) {
 			return
 		}
 	}
-
+*/
 	// 7. 调用核心服务处理投票
 	if err := ProcessVote(body.SpellAID, body.SpellBID, body.Result, userID); err != nil {
 		fmt.Printf("处理投票时发生错误: %v\n", err)

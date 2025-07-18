@@ -32,53 +32,79 @@ func getRedisRunID() (string, error) {
 }
 
 // InitializeRunID 在应用启动时执行一次，获取并设置初始的run_id。
-// 如果失败，将直接panic。
 func InitializeRunID() {
 	fmt.Println("正在获取初始Redis Run ID...")
 	runID, err := getRedisRunID()
 	if err != nil {
 		panic(fmt.Sprintf("无法在启动时获取Redis Run ID，请检查Redis服务: %v", err))
 	}
-	globalStatus.SetInitialRunID(runID)
+	database.SetInitialRunID(runID)
 	fmt.Printf("获取初始Redis Run ID成功: %s\n", runID)
 }
 
-// PerformCheck 执行一次完整的健康检查和可能的状态转换/修复操作。
-// 这个函数现在是阻塞的，可以被main.go和后台循环共同调用。
+// triggerAtomicRebuild 执行一次原子的、自校验的缓存重建。
+// 它确保只有在重建期间Redis没有再次重启的情况下，才认为重建成功。
+func triggerAtomicRebuild(idBeforeRebuild string) bool {
+	fmt.Println("健康检查: 正在触发缓存热重建...")
+	err := startup.RebuildCache()
+	if err != nil {
+		fmt.Printf("健康检查错误: 缓存热重建失败: %v\n", err)
+		return false
+	}
+
+	// 重建后，再次检查run_id以确认原子性
+	idAfterRebuild, err := getRedisRunID()
+	if err != nil {
+		fmt.Println("健康检查错误: 缓存重建后无法连接到Redis，重建无效。")
+		return false
+	}
+
+	if idBeforeRebuild != idAfterRebuild {
+		fmt.Printf("健康检查错误: 缓存重建期间检测到Redis再次重启 (run_id: %s -> %s)。重建无效。\n", idBeforeRebuild, idAfterRebuild)
+		return false
+	}
+
+	fmt.Println("健康检查: 缓存热重建成功并通过原子性校验。")
+	return true
+}
+
+// PerformCheck 执行一次完整的健康检查和可能的修复操作。
 func PerformCheck() {
-	// 1. 探测当前状态
-	runID, err := getRedisRunID()
-	isCurrentlyConnected := (err == nil)
+	currentRunID, err := getRedisRunID()
+	if err != nil {
+		// 无法连接到Redis，直接标记为不可用
+		database.UpdateStatus(false, "")
+		return
+	}
 
-	// 2. 评估状态并获取行动指令
-	needsRebuild := globalStatus.Assess(isCurrentlyConnected, runID)
+	lastKnownRunID := database.GetLastKnownRunID()
 
-	// 3. 根据指令执行操作
-	if needsRebuild {
-		fmt.Println("健康检查: 正在触发缓存热重建...")
-		rebuildErr := startup.RebuildCache()
-
-		// *** 新增逻辑：重建后再次检查run_id ***
-		runIDAfterRebuild, errAfterRebuild := getRedisRunID()
-		if errAfterRebuild != nil {
-			// 如果在重建后立刻就无法连接，说明重建是无效的
-			fmt.Println("健康检查错误: 缓存重建后无法连接到Redis，标记为重建失败。")
-			globalStatus.MarkRebuildComplete(false, "")
-			return
+	if currentRunID != lastKnownRunID {
+		// 检测到Redis重启，触发原子重建
+		rebuildSuccess := triggerAtomicRebuild(currentRunID)
+		if rebuildSuccess {
+			// 只有重建成功，才更新状态为可用，并更新已知的run_id
+			database.UpdateStatus(true, currentRunID)
+		} else {
+			// 重建失败，保持不可用状态
+			database.UpdateStatus(false, "")
 		}
-
-		// 4. 将操作结果和最新的run_id反馈给状态管理器
-		globalStatus.MarkRebuildComplete(rebuildErr == nil, runIDAfterRebuild)
+	} else {
+		// run_id未变，说明服务健康
+		database.UpdateStatus(true, currentRunID)
 	}
 }
 
-// StartRedisHealthCheck 启动一个后台Goroutine来定期驱动健康状态机
+// StartRedisHealthCheck 启动一个后台Goroutine来定期、阻塞式地执行健康检查。
 func StartRedisHealthCheck() {
 	fmt.Println("Redis高级健康检查器已启动。")
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
+	// 使用 time.Timer 实现阻塞式循环
+	timer := time.NewTimer(checkInterval)
+	defer timer.Stop()
 
-	for range ticker.C {
-		PerformCheck()
+	for {
+		<-timer.C                  // 等待定时器触发
+		PerformCheck()             // 执行检查
+		timer.Reset(checkInterval) // 重置定时器，从现在开始重新计时
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user" // *** 新增导入 ***
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -30,8 +31,9 @@ func main() {
 	fmt.Println("正在执行启动后健康检查...")
 	health.PerformCheck()
 
-	// 4. 异步启动后台的持续健康检查器
+	// *** 新增：启动所有后台工作进程 ***
 	go health.StartRedisHealthCheck()
+	go user.StartActivationWorker()
 
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
