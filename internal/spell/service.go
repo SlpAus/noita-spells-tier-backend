@@ -28,13 +28,18 @@ type SpellImageDTO struct {
 	Info SpellInfo
 }
 
-// PairDataDTO 是 GetNewSpellPair 服务返回给控制器的最终数据包。
-// 它包含了生成API响应所需的所有原始信息。
+// PairSpellDTO 包含了组成一个法术对的单个法术的完整信息，包括其即时排名
+type PairSpellDTO struct {
+	Info        SpellInfo
+	CurrentRank int64
+}
+
+// PairDataDTO 是 GetNewSpellPair 服务返回给控制器的最终数据包
 type PairDataDTO struct {
-	SpellAInfo SpellInfo
-	SpellBInfo SpellInfo
-	Payload    token.TokenPayload
-	Signature  string
+	SpellA    PairSpellDTO
+	SpellB    PairSpellDTO
+	Payload   token.TokenPayload
+	Signature string
 }
 
 // --- Service Functions ---
@@ -126,17 +131,18 @@ func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
 	}
 
 	// 3. 简单随机抽样：打乱列表并取前两个
-	// Go 1.20+版本后，rand.Seed已无需手动调用
 	rand.Shuffle(len(selectableIDs), func(i, j int) {
 		selectableIDs[i], selectableIDs[j] = selectableIDs[j], selectableIDs[i]
 	})
 	selectedIDs := selectableIDs[:2]
 	idA, idB := selectedIDs[0], selectedIDs[1]
 
-	// 4. 使用Pipeline批量获取这两个法术的静态信息(SpellInfo)
+	// 4. 使用Pipeline批量获取这两个法术的静态信息和排名
 	pipe := database.RDB.Pipeline()
 	infoACmd := pipe.HGet(database.Ctx, InfoKey, idA)
+	rankACmd := pipe.ZRevRank(database.Ctx, RankingKey, idA) // ZRevRank获取的是从0开始的排名
 	infoBCmd := pipe.HGet(database.Ctx, InfoKey, idB)
+	rankBCmd := pipe.ZRevRank(database.Ctx, RankingKey, idB)
 	_, err = pipe.Exec(database.Ctx)
 	if err != nil {
 		return nil, fmt.Errorf("无法从Redis批量获取法术对数据: %w", err)
@@ -145,7 +151,12 @@ func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
 	// 5. 解析数据
 	var infoA, infoB SpellInfo
 	_ = json.Unmarshal([]byte(infoACmd.Val()), &infoA)
+	rankA := rankACmd.Val() + 1 // 排名从1开始
 	_ = json.Unmarshal([]byte(infoBCmd.Val()), &infoB)
+	rankB := rankBCmd.Val() + 1
+
+	spellA := PairSpellDTO{Info: infoA, CurrentRank: rankA}
+	spellB := PairSpellDTO{Info: infoB, CurrentRank: rankB}
 
 	// 6. 生成PairID和签名
 	pairID, err := uuid.NewV7()
@@ -164,9 +175,9 @@ func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
 
 	// 7. 组合最终的响应DTO
 	return &PairDataDTO{
-		SpellAInfo: infoA,
-		SpellBInfo: infoB,
-		Payload:    payload,
-		Signature:  signature,
+		SpellA:    spellA,
+		SpellB:    spellB,
+		Payload:   payload,
+		Signature: signature,
 	}, nil
 }

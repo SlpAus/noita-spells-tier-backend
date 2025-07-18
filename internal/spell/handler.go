@@ -34,6 +34,7 @@ type SpellPairResponse struct {
 	Description string `json:"description"`
 	ImageURL    string `json:"imageUrl"`
 	Type        int    `json:"type"`
+	Rank        int64  `json:"rank"` // 重新添加Rank字段
 }
 
 // --- 数据格式化辅助函数 (现在使用 services DTOs) ---
@@ -57,14 +58,14 @@ func formatForImage(dto SpellImageDTO, c *gin.Context) SpellImageResponse {
 		Type:     dto.Info.Type,
 	}
 }
-func formatForPair(spellID string, info SpellInfo, c *gin.Context) SpellPairResponse {
-	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, info.Sprite)
+func formatForPair(dto PairSpellDTO, c *gin.Context) SpellPairResponse {
+	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, dto.Info.Sprite)
 	return SpellPairResponse{
-		ID:          spellID,
-		Name:        info.Name,
-		Description: info.Description,
+		Name:        dto.Info.Name,
+		Description: dto.Info.Description,
 		ImageURL:    imageURL,
-		Type:        info.Type,
+		Type:        dto.Info.Type,
+		Rank:        dto.CurrentRank, // 映射Rank字段
 	}
 }
 
@@ -125,11 +126,13 @@ func GetSpellPair(c *gin.Context) {
 
 	// 4. 将服务层返回的DTO格式化为最终的API响应
 	apiResponse := GetPairAPIResponse{
-		SpellA:    formatForPair(responseDTO.Payload.SpellAID, responseDTO.SpellAInfo, c),
-		SpellB:    formatForPair(responseDTO.Payload.SpellBID, responseDTO.SpellBInfo, c),
+		SpellA:    formatForPair(responseDTO.SpellA, c),
+		SpellB:    formatForPair(responseDTO.SpellB, c),
 		PairID:    responseDTO.Payload.PairID,
 		Signature: responseDTO.Signature,
 	}
+	apiResponse.SpellA.ID = responseDTO.Payload.SpellAID
+	apiResponse.SpellB.ID = responseDTO.Payload.SpellBID
 
 	c.JSON(http.StatusOK, apiResponse)
 }
