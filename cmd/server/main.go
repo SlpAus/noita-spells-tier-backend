@@ -8,7 +8,8 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/user" // *** 新增导入 ***
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/vote" // *** 新增导入 ***
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -18,22 +19,21 @@ func main() {
 	token.GenerateSecretKey()
 	database.InitDB()
 	database.InitRedis()
-
-	// 1. *** 新增：阻塞式获取初始Run ID ***
 	health.InitializeRunID()
 
-	// 2. 执行应用首次启动初始化流程
 	if err := startup.InitializeApplication(); err != nil {
 		panic(fmt.Sprintf("应用初始化失败，无法启动: %v", err))
 	}
 
-	// 3. *** 新增：阻塞式执行一次启动后健康检查 ***
 	fmt.Println("正在执行启动后健康检查...")
 	health.PerformCheck()
 
-	// *** 新增：启动所有后台工作进程 ***
+	// 启动所有后台工作进程
 	go health.StartRedisHealthCheck()
 	go user.StartActivationWorker()
+	if err := vote.StartVoteProcessor(); err != nil { // *** 新增调用 ***
+		panic(fmt.Sprintf("启动Vote Processor失败: %v", err))
+	}
 
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{

@@ -3,6 +3,7 @@ package startup
 import (
 	"fmt"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
@@ -13,16 +14,19 @@ func InitializeApplication() error {
 	fmt.Println("开始应用首次初始化...")
 
 	// 首次启动时，我们需要迁移数据库并预热缓存
+	if err := metadata.PrimeDB(); err != nil {
+		return err
+	}
+	if err := user.PrimeCachedDB(); err != nil {
+		return err
+	}
 	if err := spell.PrimeCachedDB(); err != nil {
 		return err
 	}
 	if err := vote.PrimeDB(); err != nil {
 		return err
 	}
-	if err := user.PrimeCachedDB(); err != nil {
-		return err
-	}
-	
+
 	fmt.Println("应用初始化完成！")
 	return nil
 }
@@ -31,14 +35,19 @@ func InitializeApplication() error {
 func RebuildCache() error {
 	fmt.Println("开始缓存热重建...")
 
-	// 热重建时，我们只执行缓存预热，不执行数据库迁移
-	if err := spell.WarmupCache(); err != nil {
-		return err
-	}
+	// 1. 重建user缓存
 	if err := user.WarmupCache(); err != nil {
 		return err
 	}
-	
+	// 2. 重建spell缓存（加载上一次的快照）
+	if err := spell.WarmupCache(); err != nil {
+		return err
+	}
+	// 3. *** 新增：处理自上次快照以来的所有增量投票 ***
+	if err := vote.ApplyIncrementalVotes(); err != nil {
+		return err
+	}
+
 	fmt.Println("缓存热重建完成！")
 	return nil
 }
