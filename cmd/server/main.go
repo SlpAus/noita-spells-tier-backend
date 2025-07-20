@@ -9,7 +9,8 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/vote" // *** 新增导入 ***
+	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -29,11 +30,12 @@ func main() {
 	health.PerformCheck()
 
 	// 启动所有后台工作进程
-	go health.StartRedisHealthCheck()
 	go user.StartActivationWorker()
-	if err := vote.StartVoteProcessor(); err != nil { // *** 新增调用 ***
+	go spell.StartBackupScheduler()
+	if err := vote.StartVoteProcessor(); err != nil {
 		panic(fmt.Sprintf("启动Vote Processor失败: %v", err))
 	}
+	go health.StartRedisHealthCheck()
 
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
@@ -50,7 +52,7 @@ func main() {
 
 	api.SetupRoutes(r)
 
-	// TODO: 在这里设置优雅停机和后台定时任务
+	// TODO: 在这里设置优雅停机
 
 	fmt.Println("服务器已准备就绪，开始监听 :8080")
 	if err := r.Run(":8080"); err != nil {

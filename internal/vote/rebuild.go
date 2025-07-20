@@ -103,7 +103,9 @@ func ApplyIncrementalVotes() error {
 		fmt.Printf("增量投票处理完成，Vote Processor将从 ID %d 继续。\n", lastProcessedID)
 	}
 
-	// TODO: 调用spell.CreateSnapshot()来创建新的快照，并更新metadata
+	// 7. 调用spell.CreateConsistentSnapshotInDB()来创建新的快照，并更新metadata
+	// 不检查错误，spell的持久化无需确保
+	spell.CreateConsistentSnapshotInDB()
 
 	return nil
 }
