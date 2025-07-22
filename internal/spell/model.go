@@ -33,4 +33,7 @@ type Spell struct {
 
 	// Win 是法术获胜的场次
 	Win int `json:"win"`
+
+	// Rank 是法术的排名
+	Rank int `gorm:"index"`
 }

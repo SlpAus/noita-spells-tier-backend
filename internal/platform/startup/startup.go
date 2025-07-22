@@ -17,7 +17,7 @@ func InitializeApplication() error {
 	if err := metadata.PrimeDB(); err != nil {
 		return err
 	}
-	if err := user.PrimeCachedDB(); err != nil {
+	if err := user.PrimeDB(); err != nil {
 		return err
 	}
 	if err := spell.PrimeCachedDB(); err != nil {

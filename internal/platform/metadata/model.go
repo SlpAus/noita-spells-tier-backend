@@ -2,8 +2,8 @@ package metadata
 
 import "gorm.io/gorm"
 
-// Model 定义了存储系统元数据的键值对表结构
-type Model struct {
+// Metadata 定义了存储系统元数据的键值对表结构
+type Metadata struct {
 	// gorm.Model 包含 ID, CreatedAt, UpdatedAt, DeletedAt
 	gorm.Model
 

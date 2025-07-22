@@ -42,10 +42,43 @@ type PairDataDTO struct {
 	Signature string
 }
 
+// --- 服务降级辅助函数---
+func getRankedSpellsFromDB() ([]RankedSpellDTO, error) {
+	var spellsFromDB []Spell
+	// 从SQLite快照中读取，并按已存入的Rank字段排序
+	if err := database.DB.Order("rank asc").Find(&spellsFromDB).Error; err != nil {
+		return nil, err
+	}
+	var dtos []RankedSpellDTO
+	for _, s := range spellsFromDB {
+		dtos = append(dtos, RankedSpellDTO{
+			ID:    s.SpellID,
+			Info:  SpellInfo{Name: s.Name, Description: s.Description, Sprite: s.Sprite, Type: s.Type},
+			Stats: SpellStats{Score: s.Score, Total: s.Total, Win: s.Win},
+		})
+	}
+	return dtos, nil
+}
+
+func getSpellInfoFromDB(spellID string) (*SpellImageDTO, error) {
+	var spellFromDB Spell
+	if err := database.DB.Where("spell_id = ?", spellID).First(&spellFromDB).Error; err != nil {
+		return nil, err // 包括 gorm.ErrRecordNotFound
+	}
+	return &SpellImageDTO{
+		ID:   spellFromDB.SpellID,
+		Info: SpellInfo{Name: spellFromDB.Name, Description: spellFromDB.Description, Sprite: spellFromDB.Sprite, Type: spellFromDB.Type},
+	}, nil
+}
+
 // --- Service Functions ---
 
 // GetRankedSpells 从Redis中获取完整的、已排序的法术列表
 func GetRankedSpells() ([]RankedSpellDTO, error) {
+	if !database.IsRedisHealthy() {
+		return getRankedSpellsFromDB()
+	}
+
 	// 1. 从Sorted Set获取所有法术ID，按分数从高到低排序
 	spellIDs, err := database.RDB.ZRevRange(database.Ctx, RankingKey, 0, -1).Result()
 	if err != nil {
@@ -55,8 +88,8 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 		return []RankedSpellDTO{}, nil
 	}
 
-	// 2. 使用Pipeline一次性获取所有法术的静态和动态数据
-	pipe := database.RDB.Pipeline()
+	// 2. 使用TxPipeline一次性获取所有法术的静态和动态数据
+	pipe := database.RDB.TxPipeline()
 	infoCmd := pipe.HMGet(database.Ctx, InfoKey, spellIDs...)
 	statsCmd := pipe.HMGet(database.Ctx, StatsKey, spellIDs...)
 	if _, err := pipe.Exec(database.Ctx); err != nil {
@@ -87,6 +120,10 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 
 // GetSpellImageInfoByID 从Redis中获取单个法术的图片所需信息
 func GetSpellImageInfoByID(spellID string) (*SpellImageDTO, error) {
+	if !database.IsRedisHealthy() {
+		return getSpellInfoFromDB(spellID)
+	}
+
 	// 1. 从Hash中获取静态数据
 	infoJSON, err := database.RDB.HGet(database.Ctx, InfoKey, spellID).Result()
 	if err == redis.Nil {
@@ -109,6 +146,10 @@ func GetSpellImageInfoByID(spellID string) (*SpellImageDTO, error) {
 
 // GetNewSpellPair 是获取法术对的核心业务逻辑
 func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
+	if !database.IsRedisHealthy() {
+		return nil, errors.New("服务暂时不可用，请稍后重试")
+	}
+
 	// 1. 从Redis的排名表(Sorted Set)中获取所有法术ID
 	allSpellIDs, err := database.RDB.ZRange(database.Ctx, RankingKey, 0, -1).Result()
 	if err != nil {
@@ -137,8 +178,12 @@ func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
 	selectedIDs := selectableIDs[:2]
 	idA, idB := selectedIDs[0], selectedIDs[1]
 
-	// 4. 使用Pipeline批量获取这两个法术的静态信息和排名
-	pipe := database.RDB.Pipeline()
+	if !database.IsRedisHealthy() {
+		return nil, errors.New("服务暂时不可用，请稍后重试")
+	}
+
+	// 4. 使用TxPipeline批量获取这两个法术的静态信息和排名
+	pipe := database.RDB.TxPipeline()
 	infoACmd := pipe.HGet(database.Ctx, InfoKey, idA)
 	rankACmd := pipe.ZRevRank(database.Ctx, RankingKey, idA) // ZRevRank获取的是从0开始的排名
 	infoBCmd := pipe.HGet(database.Ctx, InfoKey, idB)

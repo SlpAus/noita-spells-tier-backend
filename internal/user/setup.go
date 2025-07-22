@@ -6,6 +6,15 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 )
 
+// PrimeDB 负责初始化user模块的数据库部分，仅迁移表结构。
+// 缓存预热将由更高层的逻辑（例如vote模块）在同步完用户数据后触发。
+func PrimeDB() error {
+	if err := migrateDB(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // migrateDB 负责自动迁移数据库表结构
 func migrateDB() error {
 	if err := database.DB.AutoMigrate(&User{}); err != nil {
@@ -38,7 +47,6 @@ func WarmupCache() error {
 	pipe := database.RDB.Pipeline()
 	// 先清空旧的缓存，确保数据一致性
 	pipe.Del(database.Ctx, KnownUsersKey)
-	// 一次性添加所有成员
 	pipe.SAdd(database.Ctx, KnownUsersKey, userUUIDs...)
 
 	_, err := pipe.Exec(database.Ctx)
@@ -47,16 +55,5 @@ func WarmupCache() error {
 	}
 
 	fmt.Printf("成功预热 %d 个用户UUID到Redis。\n", len(users))
-	return nil
-}
-
-// PrimeCachedDB 是user模块的初始化总入口
-func PrimeCachedDB() error {
-	if err := migrateDB(); err != nil {
-		return err
-	}
-	if err := WarmupCache(); err != nil {
-		return err
-	}
 	return nil
 }

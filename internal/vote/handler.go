@@ -45,7 +45,7 @@ func SubmitVote(c *gin.Context) {
 		userID = ""
 	}
 
-	newVote := Model{
+	newVote := Vote{
 		SpellA_ID:      body.SpellAID,
 		SpellB_ID:      body.SpellBID,
 		Result:         body.Result,

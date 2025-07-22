@@ -24,7 +24,7 @@ func GetLastSnapshotVoteID() (uint, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	var meta Model
+	var meta Metadata
 	err := database.DB.Where("key = ?", lastSnapshotVoteIDKey).First(&meta).Error
 
 	if err != nil {
@@ -48,12 +48,12 @@ func GetLastSnapshotVoteID() (uint, error) {
 
 // SetLastSnapshotVoteID 将最后一次快照的vote ID写入数据库。
 // 这个操作是“upsert”（更新或插入）。
-func SetLastSnapshotVoteID(voteID uint) error {
+func SetLastSnapshotVoteID(db *gorm.DB, voteID uint) error {
 	mu.Lock()
 	defer mu.Unlock()
 
 	valueStr := strconv.FormatUint(uint64(voteID), 10)
-	meta := Model{
+	meta := Metadata{
 		Key:   lastSnapshotVoteIDKey,
 		Value: valueStr,
 	}
@@ -61,17 +61,17 @@ func SetLastSnapshotVoteID(voteID uint) error {
 	// GORM的 .Save() 方法会智能地执行更新（如果主键或唯一索引存在）或插入
 	// 为了确保是upsert，我们使用更明确的 .Clauses(clause.OnConflict)
 	// 但为了简单和兼容性，我们先查后写
-	var existing Model
-	err := database.DB.Where("key = ?", lastSnapshotVoteIDKey).First(&existing).Error
+	var existing Metadata
+	err := db.Where("key = ?", lastSnapshotVoteIDKey).First(&existing).Error
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			// 插入新记录
-			return database.DB.Create(&meta).Error
+			return db.Create(&meta).Error
 		}
 		return err
 	}
 
 	// 更新现有记录
-	return database.DB.Model(&existing).Update("value", valueStr).Error
+	return db.Model(&existing).Update("value", valueStr).Error
 }

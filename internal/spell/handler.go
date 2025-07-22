@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/gin-gonic/gin"
 )
 
@@ -103,6 +104,11 @@ func GetSpellByID(c *gin.Context) {
 
 // GetSpellPair 获取一对用于对战的法术
 func GetSpellPair(c *gin.Context) {
+	if !database.IsRedisHealthy() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "服务暂时不可用，请稍后重试"})
+		return
+	}
+
 	// 1. 解析可选的查询参数
 	excludeA := c.Query("excludeA")
 	excludeB := c.Query("excludeB")
@@ -116,7 +122,9 @@ func GetSpellPair(c *gin.Context) {
 	// 3. 调用服务层获取法术对和签名
 	responseDTO, err := GetNewSpellPair(excludeA, excludeB)
 	if err != nil {
-		if err.Error() == "数据库中法术数量不足" || err.Error() == "排除后剩余法术数量不足" {
+		if err.Error() == "服务暂时不可用，请稍后重试" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		} else if err.Error() == "数据库中法术数量不足" || err.Error() == "排除后剩余法术数量不足" {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "获取法术对失败: " + err.Error()})

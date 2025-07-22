@@ -1,6 +1,7 @@
 package vote
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -19,7 +20,7 @@ func ApplyIncrementalVotes() error {
 	}
 
 	// 2. 从SQLite中获取所有在这之后的投票记录
-	var incrementalVotes []Model
+	var incrementalVotes []Vote
 	if err := database.DB.Where("id > ?", lastSnapshotVoteID).Order("id asc").Find(&incrementalVotes).Error; err != nil {
 		return fmt.Errorf("无法从SQLite读取增量投票: %w", err)
 	}
@@ -97,15 +98,15 @@ func ApplyIncrementalVotes() error {
 
 	// 6. 更新VoteProcessor的内部状态，让它从正确的位置继续
 	if lastProcessedID > 0 {
-		globalVoteProcessor.mu.Lock()
+		globalVoteProcessor.processMutex.Lock()
 		globalVoteProcessor.lastProcessedVoteID = lastProcessedID
-		globalVoteProcessor.mu.Unlock()
+		globalVoteProcessor.processMutex.Unlock()
 		fmt.Printf("增量投票处理完成，Vote Processor将从 ID %d 继续。\n", lastProcessedID)
 	}
 
 	// 7. 调用spell.CreateConsistentSnapshotInDB()来创建新的快照，并更新metadata
 	// 不检查错误，spell的持久化无需确保
-	spell.CreateConsistentSnapshotInDB()
+	spell.CreateConsistentSnapshotInDB(context.Background())
 
 	return nil
 }
