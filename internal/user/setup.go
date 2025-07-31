@@ -26,8 +26,14 @@ func migrateDB() error {
 
 // WarmupCache 从SQLite加载所有已知的用户UUID，并预热到Redis的Set中
 func WarmupCache() error {
+	// 步骤1：无论如何，总是先清空旧的缓存，确保一个干净的开始
+	fmt.Println("正在清空旧的用户缓存...")
+	if err := database.RDB.Del(database.Ctx, KnownUsersKey).Err(); err != nil {
+		return fmt.Errorf("无法清空旧的用户缓存: %w", err)
+	}
+
 	var users []User
-	// 1. 从SQLite读取所有用户的UUID
+	// 步骤2：从SQLite读取所有用户的UUID
 	if err := database.DB.Select("uuid").Find(&users).Error; err != nil {
 		return fmt.Errorf("无法从SQLite读取用户UUID: %w", err)
 	}
@@ -37,20 +43,14 @@ func WarmupCache() error {
 		return nil
 	}
 
-	// 2. 将UUID转换为interface{}切片以用于SAdd
+	// 步骤3：将从SQLite读到的用户批量添加到Redis
 	userUUIDs := make([]interface{}, len(users))
 	for i, u := range users {
 		userUUIDs[i] = u.UUID
 	}
 
-	// 3. 使用Pipeline批量将所有UUID添加到Redis的Set中
-	pipe := database.RDB.Pipeline()
-	// 先清空旧的缓存，确保数据一致性
-	pipe.Del(database.Ctx, KnownUsersKey)
-	pipe.SAdd(database.Ctx, KnownUsersKey, userUUIDs...)
-
-	_, err := pipe.Exec(database.Ctx)
-	if err != nil {
+	// 此时只需要执行SAdd即可
+	if err := database.RDB.SAdd(database.Ctx, KnownUsersKey, userUUIDs...).Err(); err != nil {
 		return fmt.Errorf("预热用户UUID到Redis失败: %w", err)
 	}
 

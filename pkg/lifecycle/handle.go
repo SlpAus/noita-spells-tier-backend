@@ -35,11 +35,13 @@ func (h *Handle) Err() error {
 func (h *Handle) Sleep(duration time.Duration) error {
 	// 创建一个定时器，用于正常的休眠
 	timer := time.NewTimer(duration)
-	// 确保定时器资源在函数退出时被清理
-	defer timer.Stop()
 
 	select {
 	case <-h.Done():
+		// 确保定时器资源在函数退出时被清理
+		if !timer.Stop() {
+			<-timer.C
+		}
 		// 如果在休眠期间，上下文被取消，则立刻返回上下文的错误。
 		return h.Err()
 	case <-timer.C:

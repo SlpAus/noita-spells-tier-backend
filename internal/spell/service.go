@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
@@ -54,21 +56,10 @@ func getRankedSpellsFromDB() ([]RankedSpellDTO, error) {
 		dtos = append(dtos, RankedSpellDTO{
 			ID:    s.SpellID,
 			Info:  SpellInfo{Name: s.Name, Description: s.Description, Sprite: s.Sprite, Type: s.Type},
-			Stats: SpellStats{Score: s.Score, Total: s.Total, Win: s.Win},
+			Stats: SpellStats{Score: s.Score, Total: s.Total, Win: s.Win, RankScore: s.RankScore},
 		})
 	}
 	return dtos, nil
-}
-
-func getSpellInfoFromDB(spellID string) (*SpellImageDTO, error) {
-	var spellFromDB Spell
-	if err := database.DB.Where("spell_id = ?", spellID).First(&spellFromDB).Error; err != nil {
-		return nil, err // 包括 gorm.ErrRecordNotFound
-	}
-	return &SpellImageDTO{
-		ID:   spellFromDB.SpellID,
-		Info: SpellInfo{Name: spellFromDB.Name, Description: spellFromDB.Description, Sprite: spellFromDB.Sprite, Type: spellFromDB.Type},
-	}, nil
 }
 
 // --- Service Functions ---
@@ -88,27 +79,26 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 		return []RankedSpellDTO{}, nil
 	}
 
-	// 2. 使用TxPipeline一次性获取所有法术的静态和动态数据
-	pipe := database.RDB.TxPipeline()
-	infoCmd := pipe.HMGet(database.Ctx, InfoKey, spellIDs...)
-	statsCmd := pipe.HMGet(database.Ctx, StatsKey, spellIDs...)
-	if _, err := pipe.Exec(database.Ctx); err != nil {
-		return nil, fmt.Errorf("执行Redis Pipeline失败: %w", err)
+	// 2. 从Redis批量获取动态统计数据
+	statsJSONs, err := database.RDB.HMGet(database.Ctx, StatsKey, spellIDs...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("无法从Redis批量获取法术数据: %w", err)
 	}
-	infoJSONs, _ := infoCmd.Result()
-	statsJSONs, _ := statsCmd.Result()
 
-	// 3. 组合成DTO列表
+	// 3. 组合来自内存仓库的静态数据和来自Redis的动态数据
 	var rankedSpells []RankedSpellDTO
 	for i, id := range spellIDs {
-		var info SpellInfo
-		var stats SpellStats
-		if infoJSONs[i] != nil {
-			_ = json.Unmarshal([]byte(infoJSONs[i].(string)), &info)
+		index, ok := GetSpellIndexByID(id)
+		if !ok {
+			continue // 如果内存仓库中没有这个ID，跳过
 		}
+		info, _ := GetSpellInfoByIndex(index)
+
+		var stats SpellStats
 		if statsJSONs[i] != nil {
 			_ = json.Unmarshal([]byte(statsJSONs[i].(string)), &stats)
 		}
+
 		rankedSpells = append(rankedSpells, RankedSpellDTO{
 			ID:    id,
 			Info:  info,
@@ -118,111 +108,228 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 	return rankedSpells, nil
 }
 
-// GetSpellImageInfoByID 从Redis中获取单个法术的图片所需信息
+// GetSpellImageInfoByID 从内存仓库中获取单个法术的图片所需信息
 func GetSpellImageInfoByID(spellID string) (*SpellImageDTO, error) {
-	if !database.IsRedisHealthy() {
-		return getSpellInfoFromDB(spellID)
+	// 静态信息现在直接从内存读取，不再需要服务降级
+	index, ok := GetSpellIndexByID(spellID)
+	if !ok {
+		return nil, nil // 使用nil来表示未找到
 	}
+	info, _ := GetSpellInfoByIndex(index)
 
-	// 1. 从Hash中获取静态数据
-	infoJSON, err := database.RDB.HGet(database.Ctx, InfoKey, spellID).Result()
-	if err == redis.Nil {
-		return nil, nil // 未找到
-	}
-	if err != nil {
-		return nil, fmt.Errorf("无法从Redis获取法术 %s 的数据: %w", spellID, err)
-	}
-
-	// 2. 组合成DTO
-	var info SpellInfo
-	if err := json.Unmarshal([]byte(infoJSON), &info); err != nil {
-		return nil, fmt.Errorf("无法解析法术 %s 的数据: %w", spellID, err)
-	}
 	return &SpellImageDTO{
 		ID:   spellID,
 		Info: info,
 	}, nil
 }
 
-// GetNewSpellPair 是获取法术对的核心业务逻辑
+// GetNewSpellPair 实现了包含“冷门优先”和“实力接近”的智能匹配算法
 func GetNewSpellPair(excludeA, excludeB string) (*PairDataDTO, error) {
 	if !database.IsRedisHealthy() {
 		return nil, errors.New("服务暂时不可用，请稍后重试")
 	}
 
-	// 1. 从Redis的排名表(Sorted Set)中获取所有法术ID
-	allSpellIDs, err := database.RDB.ZRange(database.Ctx, RankingKey, 0, -1).Result()
-	if err != nil {
-		return nil, fmt.Errorf("无法从Redis获取所有法术ID: %w", err)
-	}
-	if len(allSpellIDs) < 2 {
-		return nil, errors.New("数据库中法术数量不足")
-	}
+	handleExcludes := (excludeA != "" && excludeB != "")
 
-	// 2. 创建一个可供抽样的ID列表，并排除指定的法术
-	selectableIDs := make([]string, 0, len(allSpellIDs))
-	excludeMap := map[string]bool{excludeA: true, excludeB: true}
-	for _, id := range allSpellIDs {
-		if !excludeMap[id] {
-			selectableIDs = append(selectableIDs, id)
+	var excludeIndexA, excludeIndexB int
+	if handleExcludes {
+		var ok bool
+		excludeIndexA, ok = GetSpellIndexByID(excludeA)
+		if !ok {
+			return nil, fmt.Errorf("排除法术A不存在: %v", excludeA)
+		}
+		excludeIndexB, ok = GetSpellIndexByID(excludeB)
+		if !ok {
+			return nil, fmt.Errorf("排除法术B不存在: %v", excludeB)
 		}
 	}
-	if len(selectableIDs) < 2 {
-		return nil, errors.New("排除后剩余法术数量不足")
-	}
 
-	// 3. 简单随机抽样：打乱列表并取前两个
-	rand.Shuffle(len(selectableIDs), func(i, j int) {
-		selectableIDs[i], selectableIDs[j] = selectableIDs[j], selectableIDs[i]
-	})
-	selectedIDs := selectableIDs[:2]
-	idA, idB := selectedIDs[0], selectedIDs[1]
+	var candidateID1, candidateID2 string
+	var candidateRank1, candidateRank2 int64
 
-	if !database.IsRedisHealthy() {
-		return nil, errors.New("服务暂时不可用，请稍后重试")
-	}
+	err := func() error {
+		// --- 阶段一: 选择第一候选法术 (冷门优先) ---
+		RLockRepository()
+		defer RUnlockRepository()
 
-	// 4. 使用TxPipeline批量获取这两个法术的静态信息和排名
-	pipe := database.RDB.TxPipeline()
-	infoACmd := pipe.HGet(database.Ctx, InfoKey, idA)
-	rankACmd := pipe.ZRevRank(database.Ctx, RankingKey, idA) // ZRevRank获取的是从0开始的排名
-	infoBCmd := pipe.HGet(database.Ctx, InfoKey, idB)
-	rankBCmd := pipe.ZRevRank(database.Ctx, RankingKey, idB)
-	_, err = pipe.Exec(database.Ctx)
+		totalWeight := GetTotalWeightUnsafe()
+
+		var weightA, weightB float64
+		if handleExcludes {
+			weightA, _ = GetWeightUnsafe(excludeIndexA)
+			totalWeight -= weightA
+			weightB, _ = GetWeightUnsafe(excludeIndexB)
+			totalWeight -= weightB
+		}
+
+		if totalWeight <= 0 {
+			return errors.New("排除后无可用法术")
+		}
+
+		randomWeight := rand.Float64() * totalWeight
+		if handleExcludes {
+			if excludeIndexA > excludeIndexB {
+				excludeIndexA, excludeIndexB = excludeIndexB, excludeIndexA
+				weightA, weightB = weightB, weightA
+			}
+			prefixA, _ := GetWeightPrefixUnsafe(excludeIndexA - 1)
+			if randomWeight >= prefixA {
+				randomWeight += weightA
+			}
+			prefixB, _ := GetWeightPrefixUnsafe(excludeIndexB - 1)
+			if randomWeight >= prefixB {
+				randomWeight += weightB
+			}
+		}
+
+		candidateIndex1, err := FindByWeightUnsafe(randomWeight)
+		if err != nil {
+			return fmt.Errorf("查找第一候选法术失败: %w", err)
+		}
+		// 处理浮点误差
+		spellCount := GetSpellCount()
+		if handleExcludes {
+			for safe := 0; ; safe++ {
+				if candidateIndex1 != excludeIndexA && candidateIndex1 != excludeIndexB {
+					break
+				}
+				if safe >= 2 {
+					return errors.New("排除后无法选出第一候选法术")
+				}
+				candidateIndex1 = (candidateIndex1 + 1) % spellCount
+			}
+		}
+
+		candidateID1, _ = GetSpellIDByIndex(candidateIndex1)
+
+		// --- 阶段二: 选择第二候选法术 (实力接近) ---
+		// 1. 获取所需数据
+		pipe := database.RDB.Pipeline()
+		rank1Cmd := pipe.ZRevRank(database.Ctx, RankingKey, candidateID1)
+		var rankACmd, rankBCmd *redis.IntCmd
+		if handleExcludes {
+			rankACmd = pipe.ZRevRank(database.Ctx, RankingKey, excludeA)
+			rankBCmd = pipe.ZRevRank(database.Ctx, RankingKey, excludeB)
+		}
+		totalVotesCmd := pipe.Get(database.Ctx, metadata.RedisTotalVotesKey)
+		_, err = pipe.Exec(database.Ctx)
+		if err != nil {
+			return errors.New("查询法术排名失败")
+		}
+
+		candidateRank1, err = rank1Cmd.Result()
+		if err != nil {
+			return fmt.Errorf("查找排除法术排名失败: %w", err)
+		}
+		var rankA, rankB int64
+		if handleExcludes {
+			rankA, err = rankACmd.Result()
+			if err != nil {
+				return fmt.Errorf("查找排除法术排名失败: %w", err)
+			}
+			rankB, err = rankBCmd.Result()
+			if err != nil {
+				return fmt.Errorf("查找排除法术排名失败: %w", err)
+			}
+		}
+		totalVotes, err := totalVotesCmd.Float64()
+		if err != nil {
+			return errors.New("获取总投票数失败")
+		}
+
+		// 2. 计算混合比例和总权重
+		mixtureFactor := globalGaussianMatcher.GetMixtureFactor(totalVotes)
+		minMixedWeight := globalGaussianMatcher.GetMixedPrefixSum(0-int(candidateRank1), mixtureFactor)
+		maxMixedWeight := globalGaussianMatcher.GetMixedPrefixSum((spellCount-1)-int(candidateRank1), mixtureFactor)
+		totalMixedWeight := maxMixedWeight - minMixedWeight
+
+		// 3. 处理排除
+		var excludedRanks []int
+		if handleExcludes {
+			excludedRanks = append(excludedRanks, int(rankA))
+			excludedRanks = append(excludedRanks, int(rankB))
+
+			for _, r := range excludedRanks {
+				totalMixedWeight -= globalGaussianMatcher.GetMixedWeight(r-int(candidateRank1), mixtureFactor)
+			}
+		}
+
+		// 4. 加权随机抽样
+		randWeight2 := rand.Float64()*totalMixedWeight + minMixedWeight
+
+		// 5. 调整随机数以跳过排除区间
+		if handleExcludes {
+			sort.Ints(excludedRanks)
+			for _, r := range excludedRanks {
+				rankDiff := r - int(candidateRank1)
+				var preRankDiff int
+				if rankDiff == 1 {
+					preRankDiff = -1
+				} else {
+					preRankDiff = rankDiff - 1
+				}
+				prefix := globalGaussianMatcher.GetMixedPrefixSum(preRankDiff, mixtureFactor)
+				if randWeight2 >= prefix {
+					randWeight2 += globalGaussianMatcher.GetMixedWeight(rankDiff, mixtureFactor)
+				}
+			}
+		}
+
+		// 6. 二分查找排名差距
+		targetRankDiff := globalGaussianMatcher.FindRankOffsetByMixedPrefixSum(randWeight2, mixtureFactor)
+		candidateRank2 = candidateRank1 + int64(targetRankDiff)
+		candidateRank2 = max(0, min(int64(spellCount-1), candidateRank2))
+
+		// 处理浮点误差
+		excludedRanks = append(excludedRanks, int(candidateRank1))
+		for safe := 0; ; safe++ {
+			isValid := true
+			for _, r := range excludedRanks {
+				if int(candidateRank2) == r {
+					isValid = false
+					break
+				}
+			}
+			if isValid {
+				break
+			}
+			if !handleExcludes && safe >= 1 || handleExcludes && safe >= 3 {
+				return errors.New("无法选出第二候选法术")
+			}
+			candidateRank2 = (candidateRank2 + 1) % int64(spellCount)
+		}
+
+		// 7. 从排名获取ID
+		candidateIDs2, err := database.RDB.ZRevRange(database.Ctx, RankingKey, candidateRank2, candidateRank2).Result()
+		if err != nil {
+			return fmt.Errorf("无法从排名获取第二候选法术: %w", err)
+		}
+		candidateID2 = candidateIDs2[0]
+
+		return nil
+	}()
+
 	if err != nil {
-		return nil, fmt.Errorf("无法从Redis批量获取法术对数据: %w", err)
+		return nil, err
 	}
 
-	// 5. 解析数据
-	var infoA, infoB SpellInfo
-	_ = json.Unmarshal([]byte(infoACmd.Val()), &infoA)
-	rankA := rankACmd.Val() + 1 // 排名从1开始
-	_ = json.Unmarshal([]byte(infoBCmd.Val()), &infoB)
-	rankB := rankBCmd.Val() + 1
-
-	spellA := PairSpellDTO{Info: infoA, CurrentRank: rankA}
-	spellB := PairSpellDTO{Info: infoB, CurrentRank: rankB}
-
-	// 6. 生成PairID和签名
-	pairID, err := uuid.NewV7()
-	if err != nil {
-		return nil, fmt.Errorf("无法生成PairID: %w", err)
-	}
-	payload := token.TokenPayload{
-		PairID:   pairID.String(),
-		SpellAID: idA,
-		SpellBID: idB,
-	}
-	signature, err := token.GenerateVoteSignature(payload)
-	if err != nil {
-		return nil, fmt.Errorf("无法生成投票签名: %w", err)
+	// --- 后续流程 ---
+	if rand.Float32() > 0.5 {
+		candidateID1, candidateID2 = candidateID2, candidateID1
+		candidateRank1, candidateRank2 = candidateRank2, candidateRank1
 	}
 
-	// 7. 组合最终的响应DTO
-	return &PairDataDTO{
-		SpellA:    spellA,
-		SpellB:    spellB,
-		Payload:   payload,
-		Signature: signature,
-	}, nil
+	indexA, _ := GetSpellIndexByID(candidateID1)
+	infoA, _ := GetSpellInfoByIndex(indexA)
+
+	indexB, _ := GetSpellIndexByID(candidateID2)
+	infoB, _ := GetSpellInfoByIndex(indexB)
+
+	spellA := PairSpellDTO{Info: infoA, CurrentRank: candidateRank1 + 1}
+	spellB := PairSpellDTO{Info: infoB, CurrentRank: candidateRank2 + 1}
+
+	pairID, _ := uuid.NewV7()
+	payload := token.TokenPayload{PairID: pairID.String(), SpellAID: candidateID1, SpellBID: candidateID2}
+	signature, _ := token.GenerateVoteSignature(payload)
+	return &PairDataDTO{SpellA: spellA, SpellB: spellB, Payload: payload, Signature: signature}, nil
 }

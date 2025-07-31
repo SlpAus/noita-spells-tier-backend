@@ -8,15 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// --- API响应模型 (不变) ---
+// --- API响应模型 ---
 type RankingSpellResponse struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	ImageURL string  `json:"imageUrl"`
-	Type     int     `json:"type"`
-	Score    float64 `json:"score"`
-	Total    int     `json:"total"`
-	Win      int     `json:"win"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	ImageURL  string  `json:"imageUrl"`
+	Type      int     `json:"type"`
+	Score     float64 `json:"score"`
+	Total     float64 `json:"total"`
+	Win       float64 `json:"win"`
+	RankScore float64 `json:"rankScore"`
 }
 type SpellImageResponse struct {
 	ID       string `json:"id"`
@@ -42,13 +43,14 @@ type SpellPairResponse struct {
 func formatForRanking(dto RankedSpellDTO, c *gin.Context) RankingSpellResponse {
 	imageURL := fmt.Sprintf("http://%s/images/spells/%s", c.Request.Host, dto.Info.Sprite)
 	return RankingSpellResponse{
-		ID:       dto.ID,
-		Name:     dto.Info.Name,
-		ImageURL: imageURL,
-		Type:     dto.Info.Type,
-		Score:    dto.Stats.Score,
-		Total:    dto.Stats.Total,
-		Win:      dto.Stats.Win,
+		ID:        dto.ID,
+		Name:      dto.Info.Name,
+		ImageURL:  imageURL,
+		Type:      dto.Info.Type,
+		Score:     dto.Stats.Score,
+		Total:     dto.Stats.Total,
+		Win:       dto.Stats.Win,
+		RankScore: dto.Stats.RankScore, // 增加新字段
 	}
 }
 func formatForImage(dto SpellImageDTO, c *gin.Context) SpellImageResponse {

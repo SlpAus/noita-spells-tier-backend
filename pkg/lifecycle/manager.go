@@ -14,8 +14,8 @@ type Manager struct {
 	mu       sync.Mutex
 	services map[string]bool
 
-	ctx      context.Context
-	cancel   context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewManager 创建一个新的、功能完備的生命周期管理器。
@@ -71,10 +71,12 @@ func (m *Manager) WaitWithTimeout(timeout time.Duration) []string {
 	}()
 
 	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 
 	select {
 	case <-doneChan:
+		if !timer.Stop() {
+			<-timer.C
+		}
 		return nil
 	case <-timer.C:
 		m.mu.Lock()

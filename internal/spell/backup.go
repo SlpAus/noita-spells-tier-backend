@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
-	"github.com/go-redis/redis/v8"
 	"gorm.io/gorm"
 )
 
@@ -57,32 +55,27 @@ func CreateConsistentSnapshotInDB(ctx context.Context) error {
 
 	// 1. 使用原子事务(TxPipeline)从Redis获取快照
 	pipe := database.RDB.TxPipeline()
-	lastVoteIDCmd := pipe.Get(database.Ctx, metadata.LastProcessedVoteIDKey)
+	lastVoteIDCmd := pipe.Get(database.Ctx, metadata.RedisLastProcessedVoteIDKey)
+	totalVotesCmd := pipe.Get(database.Ctx, metadata.RedisTotalVotesKey)
 	statsMapCmd := pipe.HGetAll(database.Ctx, StatsKey)
 	sortedIDsCmd := pipe.ZRevRange(database.Ctx, RankingKey, 0, -1)
 	_, err := pipe.Exec(database.Ctx)
 
 	if err != nil {
-		if err == redis.Nil {
-			fmt.Println("备份调度器: 关键元数据不存在 (可能尚未处理任何投票)，跳过备份。")
-			return nil
-		}
-		// 对于所有其他错误（网络问题、事务失败等），则报告为严重故障
 		return fmt.Errorf("无法从Redis原子地获取快照数据: %w", err)
 	}
 
-	lastVoteIDStr, err := lastVoteIDCmd.Result()
+	lastVoteIDUint64, err := lastVoteIDCmd.Uint64()
 	if err != nil {
-		if err == redis.Nil {
-			fmt.Println("备份调度器: 关键元数据不存在 (可能尚未处理任何投票)，跳过备份。")
-			return nil
-		}
-		return fmt.Errorf("获取 lastVoteIDCmd 的结果时失败: %w", err)
+		return fmt.Errorf("获取 lastVoteIDUint64 的结果时失败: %w", err)
 	}
-	lastVoteID, err := strconv.ParseUint(lastVoteIDStr, 10, 32)
+	lastVoteID := uint(lastVoteIDUint64)
+
+	totalVotes, err := totalVotesCmd.Float64()
 	if err != nil {
-		return fmt.Errorf("解析 lastVoteID 失败: %w", err)
+		return fmt.Errorf("获取 totalVotes 的结果时失败: %w", err)
 	}
+
 	statsMap, err := statsMapCmd.Result()
 	if err != nil {
 		return fmt.Errorf("获取 statsMap 的结果时失败: %w", err)
@@ -98,13 +91,31 @@ func CreateConsistentSnapshotInDB(ctx context.Context) error {
 	default:
 	}
 
+	lastSnapshotVoteID, err := metadata.GetLastSnapshotVoteID(database.DB)
+	if err != nil {
+		return fmt.Errorf("获取 lastSnapshotVoteID 失败: %w", err)
+	}
+	snapshotTotalVotes, err := metadata.GetSnapshotTotalVotes(database.DB)
+	if err != nil {
+		return fmt.Errorf("获取 snapshotTotalVotes 失败: %w", err)
+	}
+
+	// 无需备份
+	if lastVoteID == lastSnapshotVoteID {
+		return nil
+	}
+
+	// 只需要更新 LastSnapshotVoteID
+	if totalVotes == snapshotTotalVotes {
+		return metadata.SetLastSnapshotVoteID(database.DB, lastVoteID)
+	}
+
 	// 2. 将快照数据持久化到SQLite
 	return database.DB.Transaction(func(tx *gorm.DB) error {
 		for i, spellID := range sortedSpellIDs {
 			rank := i + 1
 			statsJSON, ok := statsMap[spellID]
 			if !ok {
-				// 如果在stats哈希表中找不到ID，说明数据可能不一致，跳过此条记录
 				fmt.Printf("备份警告: 在stats哈希表中找不到ID为 %s 的法术，跳过备份。\n", spellID)
 				continue
 			}
@@ -116,19 +127,23 @@ func CreateConsistentSnapshotInDB(ctx context.Context) error {
 			}
 
 			err := tx.Model(&Spell{}).Where("spell_id = ?", spellID).Updates(map[string]interface{}{
-				"score": stats.Score,
-				"total": stats.Total,
-				"win":   stats.Win,
-				"rank":  rank, // 写入排名
+				"score":      stats.Score,
+				"total":      stats.Total,
+				"win":        stats.Win,
+				"rank":       rank,
+				"rank_score": stats.RankScore, // 增加新字段
 			}).Error
 			if err != nil {
 				return fmt.Errorf("更新法术 %s 的数据失败: %w", spellID, err)
 			}
 		}
 
-		// 3. 在同一个事务中，更新持久化的元数据检查点
-		if err := metadata.SetLastSnapshotVoteID(tx, uint(lastVoteID)); err != nil {
-			return fmt.Errorf("更新元数据检查点失败: %w", err)
+		// 3. 在同一个事务中，更新持久化的元数据
+		if err := metadata.SetLastSnapshotVoteID(tx, lastVoteID); err != nil {
+			return fmt.Errorf("更新元数据 LastSnapshotVoteID 失败: %w", err)
+		}
+		if err := metadata.SetSnapshotTotalVotes(tx, totalVotes); err != nil {
+			return fmt.Errorf("更新元数据 SnapshotTotalVotes 失败: %w", err)
 		}
 
 		return nil

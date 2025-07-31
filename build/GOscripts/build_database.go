@@ -113,6 +113,7 @@ func preprocessSpells() ([]CleanSpell, []spell.Spell, error) {
 			Score:       1500,
 			Total:       0,
 			Win:         0,
+			RankScore:   0.5,
 		}
 		dbSpells = append(dbSpells, dbSpell)
 	}
@@ -161,9 +162,10 @@ func cleanDatabase() {
 	result := database.DB.Model(&spell.Spell{}).
 		Session(&gorm.Session{AllowGlobalUpdate: true}).
 		Updates(map[string]interface{}{
-			"score": 1500,
-			"total": 0,
-			"win":   0,
+			"score":      1500,
+			"total":      0,
+			"win":        0,
+			"rank_score": 0.5,
 		})
 	// *** 修改部分结束 ***
 

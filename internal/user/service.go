@@ -15,7 +15,7 @@ import (
 )
 
 // activationQueue 是一个带缓冲的channel，用作异步处理用户激活请求的任务队列。
-var activationQueue = make(chan string, 100) // 缓冲100个请求
+var activationQueue = make(chan string, 1000) // 缓冲100个请求
 
 // IsValidUUID 验证一个字符串是否是合法的、非未来的v7 UUID。
 func IsValidUUID(uuidStr string) bool {
@@ -42,7 +42,7 @@ func CreateProvisionalUser() (string, error) {
 // 这是由vote模块在初始化时调用的。
 func BatchCreateUsers(userIDs []string) error {
 	if len(userIDs) == 0 {
-		return nil
+		return WarmupCache()
 	}
 	usersToCreate := make([]User, len(userIDs))
 	for i, id := range userIDs {
@@ -109,7 +109,6 @@ func processActivation(handle *lifecycle.Handle, userID string) {
 			return // 用户已激活，无需操作
 		}
 		if err != nil && err != redis.Nil {
-			fmt.Printf("激活用户 %s 时Redis检查失败: %v\n", userID, err)
 			// 即使检查失败，我们依然继续尝试写入，以SQLite为准
 		}
 	}
@@ -204,7 +203,7 @@ func writeToRedisWithRetry(handle *lifecycle.Handle, userID string) {
 		// 每次写入前都检查Redis健康状态
 		if !database.IsRedisHealthy() {
 			fmt.Printf("Redis当前不可用，用户 %s 的激活将等待健康检查恢复...\n", userID)
-			if sleepErr := handle.Sleep(5 * time.Second); sleepErr != nil {        // 与健康检查同步睡眠
+			if sleepErr := handle.Sleep(5 * time.Second); sleepErr != nil { // 与健康检查同步睡眠
 				return
 			}
 			baseDelay = 100 * time.Millisecond // 重置退避

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -17,7 +16,20 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-const eloKFactor = 32
+// voteMinHeap 实现了 container/heap 接口
+type voteMinHeap []Vote
+
+func (h voteMinHeap) Len() int            { return len(h) }
+func (h voteMinHeap) Less(i, j int) bool  { return h[i].ID < h[j].ID }
+func (h voteMinHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
+func (h *voteMinHeap) Push(x interface{}) { *h = append(*h, x.(Vote)) }
+func (h *voteMinHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
 
 // voteProcessor 是一个单一写入者，负责按顺序处理投票事件并更新Redis
 type voteProcessor struct {
@@ -133,7 +145,7 @@ func (vp *voteProcessor) drainQueue(forcefulHandle *lifecycle.Handle) {
 			vote := heap.Pop(vp.buffer).(Vote)
 			vp.processMutex.Unlock()
 			// 在排空模式下，我们简化重试逻辑，如果失败则放弃
-			if err := vp.applyVoteToRedis(vote); err == nil {
+			if err := vp.applyVoteToRepository(vote); err == nil {
 				vp.processMutex.Lock()
 				vp.lastProcessedVoteID = vote.ID
 				vp.processMutex.Unlock()
@@ -172,7 +184,7 @@ func (vp *voteProcessor) processSingleVote(gracefulHandle *lifecycle.Handle) {
 	}
 
 	// 处理投票，现在包含了精细化的重试逻辑
-	err = vp.applyVoteToRedisWithRetry(gracefulHandle, nextVote)
+	err = vp.applyVoteToRepositoryWithRetry(gracefulHandle, nextVote)
 	if err != nil {
 		// 可能是Redis不健康了
 		if err != context.Canceled && err != context.DeadlineExceeded {
@@ -230,14 +242,14 @@ func (vp *voteProcessor) getNextContinuousVote(gracefulHandle *lifecycle.Handle)
 	}
 }
 
-// applyVoteToRedisWithRetry 包含了您设计的、带有指数退避和健康检查的重试逻辑
-func (vp *voteProcessor) applyVoteToRedisWithRetry(gracefulHandle *lifecycle.Handle, vote Vote) error {
+// applyVoteToRepositoryWithRetry 包含了您设计的、带有指数退避和健康检查的重试逻辑
+func (vp *voteProcessor) applyVoteToRepositoryWithRetry(gracefulHandle *lifecycle.Handle, vote Vote) error {
 	initialDelay := 8 * time.Millisecond
 	maxDelay := 2 * time.Second
 
 	delay := initialDelay
 	for delay < maxDelay { // 短循环重试
-		err := vp.applyVoteToRedis(vote)
+		err := vp.applyVoteToRepository(vote)
 		if err == nil {
 			return nil // 成功
 		}
@@ -254,7 +266,7 @@ func (vp *voteProcessor) applyVoteToRedisWithRetry(gracefulHandle *lifecycle.Han
 			return errors.New("redis became unhealthy during retry")
 		}
 
-		err := vp.applyVoteToRedis(vote)
+		err := vp.applyVoteToRepository(vote)
 		if err == nil {
 			return nil // 最终成功
 		}
@@ -329,92 +341,147 @@ func (vp *voteProcessor) checkAndRequeueMissedVotes(ctx context.Context) {
 	}
 }
 
-// applyVoteToRedis 将单个投票的计算结果原子地更新到Redis
-func (vp *voteProcessor) applyVoteToRedis(vote Vote) error {
+// applyVoteToRepository 将单个投票的计算结果原子地更新到Redis和内存仓库
+func (vp *voteProcessor) applyVoteToRepository(vote Vote) error {
 	if vote.Result == ResultSkip {
-		// 对于跳过的投票，我们依然需要更新检查点
-		fmt.Printf("%+v\n", vote.Result)
-		fmt.Printf("%+v\n", ResultSkip)
-		return database.RDB.Set(database.Ctx, metadata.LastProcessedVoteIDKey, vote.ID, 0).Err()
+		// 对于跳过的投票，我们只需要原子地更新检查点
+		return database.RDB.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0).Err()
 	}
 
-	// 1. 获取当前统计数据
+	// 1. 加写锁，保护对Redis和内存权重树的联合更新
+	spell.LockRepository()
+	defer spell.UnlockRepository()
+
+	vp.processMutex.Lock()
+	currentID := vp.lastProcessedVoteID
+	vp.processMutex.Unlock()
+	if currentID > vote.ID {
+		return nil
+	}
+
+	// 2. 从Redis获取当前统计数据
 	keys := []string{vote.SpellA_ID, vote.SpellB_ID}
 	statsJSONs, err := database.RDB.HMGet(database.Ctx, spell.StatsKey, keys...).Result()
 	if err != nil {
 		return fmt.Errorf("无法从Redis获取法术统计数据: %w", err)
 	}
 	if statsJSONs[0] == nil || statsJSONs[1] == nil {
-		fmt.Printf("警告: 处理 vote ID %d 时发现法术不存在 (%s or %s)，跳过此投票。\n", vote.ID, vote.SpellA_ID, vote.SpellB_ID)
-		// 即使法术不存在，我们依然更新检查点，虽然这不太可能
-		return database.RDB.Set(database.Ctx, metadata.LastProcessedVoteIDKey, vote.ID, 0).Err()
+		return fmt.Errorf("无法从Redis获取法术JSON数据")
 	}
 
 	var statsA, statsB spell.SpellStats
-	if err = json.Unmarshal([]byte(statsJSONs[0].(string)), &statsA); err != nil {
-		panic(err)
-	}
-	if err = json.Unmarshal([]byte(statsJSONs[1].(string)), &statsB); err != nil {
-		panic(err)
-	}
+	_ = json.Unmarshal([]byte(statsJSONs[0].(string)), &statsA)
+	_ = json.Unmarshal([]byte(statsJSONs[1].(string)), &statsB)
+	oldScoreA, oldScoreB := statsA.Score, statsB.Score
 
-	// 2. 计算新数据
+	// 3. 计算新的ELO, Win, Total
 	switch vote.Result {
 	case ResultAWins:
-		statsA.Score, statsB.Score = calculateElo(statsA.Score, statsB.Score)
-		statsA.Win++
-		statsA.Total++
-		statsB.Total++
-		fmt.Printf("ResultAWins\n")
+		statsA.Score, statsB.Score = calculateElo(statsA.Score, statsB.Score, vote.Multiplier)
+		statsA.Win += vote.Multiplier
+		statsA.Total += vote.Multiplier
+		statsB.Total += vote.Multiplier
 	case ResultBWins:
-		statsB.Score, statsA.Score = calculateElo(statsB.Score, statsA.Score)
-		statsB.Win++
-		statsB.Total++
-		statsA.Total++
-		fmt.Printf("ResultBWins\n")
+		statsB.Score, statsA.Score = calculateElo(statsB.Score, statsA.Score, vote.Multiplier)
+		statsB.Win += vote.Multiplier
+		statsB.Total += vote.Multiplier
+		statsA.Total += vote.Multiplier
 	case ResultDraw:
-		statsA.Total++
-		statsB.Total++
-		fmt.Printf("ResultDraw\n")
-	case ResultSkip:
-		panic("imposible to be ResultSkip here")
-	default:
-		panic("invalid vote.Result")
+		statsA.Total += vote.Multiplier
+		statsB.Total += vote.Multiplier
 	}
 
-	// 3. 使用Pipeline将所有写操作打包成一个原子事务
+	eloTrackerTx := globalEloTracker.BeginUpdate()
+	defer eloTrackerTx.RollbackUnlessCommitted()
+
+	// 4. 检查ELO边界是否变化
+	boundaryChanged := globalEloTracker.Update(eloTrackerTx, oldScoreA, statsA.Score) || globalEloTracker.Update(eloTrackerTx, oldScoreB, statsB.Score)
+
+	// 5. 根据边界变化情况，选择性地更新或全局重建
+	if boundaryChanged {
+		err = rebuildAllRankScores(eloTrackerTx, vote, statsA, statsB)
+	} else {
+		// 6. 正常更新
+		// 计算新的RankScore
+		statsA.RankScore = CalculateRankScore(eloTrackerTx, statsA.Score, statsA.Total, statsA.Win)
+		statsB.RankScore = CalculateRankScore(eloTrackerTx, statsB.Score, statsB.Total, statsB.Win)
+
+		// 原子地写入Redis
+		pipe := database.RDB.TxPipeline()
+		statsAJSON, _ := json.Marshal(statsA)
+		statsBJSON, _ := json.Marshal(statsB)
+		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellA_ID, statsAJSON)
+		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellB_ID, statsBJSON)
+		pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsA.RankScore, Member: vote.SpellA_ID})
+		pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsB.RankScore, Member: vote.SpellB_ID})
+		pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
+		pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
+		_, err = pipe.Exec(database.Ctx)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// 更新内存权重树
+	indexA, _ := spell.GetSpellIndexByID(vote.SpellA_ID)
+	indexB, _ := spell.GetSpellIndexByID(vote.SpellB_ID)
+	spell.UpdateWeightUnsafe(indexA, spell.CalculateWeightForTotal(statsA.Total))
+	spell.UpdateWeightUnsafe(indexB, spell.CalculateWeightForTotal(statsB.Total))
+
+	eloTrackerTx.Commit()
+	return nil
+}
+
+// rebuildAllRankScores 在ELO边界变化时，执行全局的RankScore重算和批量更新
+func rebuildAllRankScores(tx *eloTrackerTx, vote Vote, currentStatsA, currentStatsB spell.SpellStats) error {
+	fmt.Println("检测到ELO边界变化，正在执行全局RankScore重建...")
+
+	// 1. 获取所有法术的统计数据
+	allStatsJSON, err := database.RDB.HGetAll(database.Ctx, spell.StatsKey).Result()
+	if err != nil {
+		return fmt.Errorf("无法获取所有法术统计数据以进行重建: %w", err)
+	}
+
+	updatedStats := make(map[string]spell.SpellStats)
+
+	for id, statsJSON := range allStatsJSON {
+		var stats spell.SpellStats
+		_ = json.Unmarshal([]byte(statsJSON), &stats)
+		updatedStats[id] = stats
+	}
+
+	// 2. 将当前投票的最新结果应用到全量数据中
+	updatedStats[vote.SpellA_ID] = currentStatsA
+	updatedStats[vote.SpellB_ID] = currentStatsB
+
+	// 3. 重新计算所有法术的RankScore
+	allScores := make([]float64, 0, len(allStatsJSON))
+	for _, stats := range updatedStats {
+		allScores = append(allScores, stats.Score)
+	}
+
+	// 重置ELO追踪器
+	globalEloTracker.Reset(tx, allScores)
+
+	// 现在用更新后的边界，为所有法术计算新的RankScore
+	for id, stats := range updatedStats {
+		stats.RankScore = CalculateRankScore(tx, stats.Score, stats.Total, stats.Win)
+		updatedStats[id] = stats
+	}
+
+	// 4. 原子地将所有更新写回Redis
 	pipe := database.RDB.TxPipeline()
-	statsAJSON, _ := json.Marshal(statsA)
-	statsBJSON, _ := json.Marshal(statsB)
-	pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellA_ID, statsAJSON)
-	pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellB_ID, statsBJSON)
-	pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsA.Score, Member: vote.SpellA_ID})
-	pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsB.Score, Member: vote.SpellB_ID})
-	// *** 新增：原子地更新检查点 ***
-	pipe.Set(database.Ctx, metadata.LastProcessedVoteIDKey, vote.ID, 0)
+	newRanking := make([]*redis.Z, 0, len(updatedStats))
+	for id, stats := range updatedStats {
+		statsJSON, _ := json.Marshal(stats)
+		pipe.HSet(database.Ctx, spell.StatsKey, id, statsJSON)
+		newRanking = append(newRanking, &redis.Z{Score: stats.RankScore, Member: id})
+	}
+	pipe.ZAdd(database.Ctx, spell.RankingKey, newRanking...) // 批量更新排名
+	pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
+	pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
 
 	_, err = pipe.Exec(database.Ctx)
 	return err
-}
-
-func calculateElo(winnerScore, loserScore float64) (float64, float64) {
-	expectedWinner := 1.0 / (1.0 + math.Pow(10, (loserScore-winnerScore)/400.0))
-	newWinnerScore := winnerScore + eloKFactor*(1-expectedWinner)
-	newLoserScore := loserScore - eloKFactor*expectedWinner
-	return newWinnerScore, newLoserScore
-}
-
-// voteMinHeap 实现了 container/heap 接口
-type voteMinHeap []Vote
-
-func (h voteMinHeap) Len() int            { return len(h) }
-func (h voteMinHeap) Less(i, j int) bool  { return h[i].ID < h[j].ID }
-func (h voteMinHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *voteMinHeap) Push(x interface{}) { *h = append(*h, x.(Vote)) }
-func (h *voteMinHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
-	return x
 }

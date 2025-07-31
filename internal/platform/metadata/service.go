@@ -1,77 +1,86 @@
 package metadata
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
-	"sync"
 
-	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-const (
-	// lastSnapshotVoteIDKey 是存储在数据库中的键名
-	lastSnapshotVoteIDKey = "last_snapshot_vote_id"
-)
+// --- Generic Accessors ---
 
-var (
-	// 使用一个互斥锁来保护对metadata表的并发写操作
-	mu sync.Mutex
-)
-
-// GetLastSnapshotVoteID 从数据库中获取最后一次快照时对应的vote ID。
-// 如果从未设置过，则返回0。
-func GetLastSnapshotVoteID() (uint, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
+// GetValue retrieves a value for a given key from the metadata table.
+func GetValue(db *gorm.DB, key string) (string, error) {
 	var meta Metadata
-	err := database.DB.Where("key = ?", lastSnapshotVoteIDKey).First(&meta).Error
-
+	err := db.Where("key = ?", key).First(&meta).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 如果记录不存在，这是正常情况（首次运行），返回0
-			return 0, nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// If the key doesn't exist, return an empty string, which is a valid default.
+			return "", nil
 		}
-		// 其他数据库错误
-		return 0, err
+		return "", err
 	}
+	return meta.Value, nil
+}
 
-	// 将字符串值转换为uint
-	id, err := strconv.ParseUint(meta.Value, 10, 32)
+// SetValue creates or updates a value for a given key within a transaction.
+func SetValue(db *gorm.DB, key, value string) error {
+	// Use GORM's OnConflict clause for an efficient and atomic "upsert" operation.
+	// It will update the 'value' column if a record with the same 'key' already exists.
+	meta := Metadata{
+		Key:   key,
+		Value: value,
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(&meta).Error
+}
+
+// --- Specific Helpers for Type Conversion ---
+
+// GetLastSnapshotVoteID is a helper that retrieves and parses the last snapshot vote ID.
+func GetLastSnapshotVoteID(db *gorm.DB) (uint, error) {
+	valueStr, err := GetValue(db, LastSnapshotVoteIDKey)
 	if err != nil {
-		// 如果值格式不正确，返回0并记录错误
 		return 0, err
 	}
-
+	if valueStr == "" {
+		return 0, nil
+	}
+	id, err := strconv.ParseUint(valueStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("无法解析元数据 '%s' 的值: %w", LastSnapshotVoteIDKey, err)
+	}
 	return uint(id), nil
 }
 
-// SetLastSnapshotVoteID 将最后一次快照的vote ID写入数据库。
-// 这个操作是“upsert”（更新或插入）。
+// SetLastSnapshotVoteID is a helper that formats and sets the last snapshot vote ID.
 func SetLastSnapshotVoteID(db *gorm.DB, voteID uint) error {
-	mu.Lock()
-	defer mu.Unlock()
-
 	valueStr := strconv.FormatUint(uint64(voteID), 10)
-	meta := Metadata{
-		Key:   lastSnapshotVoteIDKey,
-		Value: valueStr,
-	}
+	return SetValue(db, LastSnapshotVoteIDKey, valueStr)
+}
 
-	// GORM的 .Save() 方法会智能地执行更新（如果主键或唯一索引存在）或插入
-	// 为了确保是upsert，我们使用更明确的 .Clauses(clause.OnConflict)
-	// 但为了简单和兼容性，我们先查后写
-	var existing Metadata
-	err := db.Where("key = ?", lastSnapshotVoteIDKey).First(&existing).Error
-
+// GetSnapshotTotalVotes is a helper that retrieves and parses the total votes count.
+func GetSnapshotTotalVotes(db *gorm.DB) (float64, error) {
+	valueStr, err := GetValue(db, SnapshotTotalVotesKey)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 插入新记录
-			return db.Create(&meta).Error
-		}
-		return err
+		return 0.0, err
 	}
+	if valueStr == "" {
+		return 0.0, nil
+	}
+	count, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("无法解析元数据 '%s' 的值: %w", SnapshotTotalVotesKey, err)
+	}
+	return count, nil
+}
 
-	// 更新现有记录
-	return db.Model(&existing).Update("value", valueStr).Error
+// SetSnapshotTotalVotes is a helper that formats and sets the total votes count.
+func SetSnapshotTotalVotes(db *gorm.DB, count float64) error {
+	valueStr := strconv.FormatFloat(count, 'f', -1, 64)
+	return SetValue(db, SnapshotTotalVotesKey, valueStr)
 }

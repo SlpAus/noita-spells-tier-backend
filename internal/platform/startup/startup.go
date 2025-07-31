@@ -13,8 +13,8 @@ import (
 func InitializeApplication() error {
 	fmt.Println("开始应用首次初始化...")
 
-	// 首次启动时，我们需要迁移数据库并预热缓存
-	if err := metadata.PrimeDB(); err != nil {
+	// *** 已修改：调用 PrimeCachedDB ***
+	if err := metadata.PrimeCachedDB(); err != nil {
 		return err
 	}
 	if err := user.PrimeDB(); err != nil {
@@ -23,7 +23,7 @@ func InitializeApplication() error {
 	if err := spell.PrimeCachedDB(); err != nil {
 		return err
 	}
-	if err := vote.PrimeDB(); err != nil {
+	if err := vote.PrimeModule(); err != nil {
 		return err
 	}
 
@@ -35,15 +35,16 @@ func InitializeApplication() error {
 func RebuildCache() error {
 	fmt.Println("开始缓存热重建...")
 
-	// 1. 重建user缓存
+	// *** 新增：重建metadata缓存 ***
+	if err := metadata.WarmupCache(); err != nil {
+		return err
+	}
 	if err := user.WarmupCache(); err != nil {
 		return err
 	}
-	// 2. 重建spell缓存（加载上一次的快照）
 	if err := spell.WarmupCache(); err != nil {
 		return err
 	}
-	// 3. *** 新增：处理自上次快照以来的所有增量投票 ***
 	if err := vote.ApplyIncrementalVotes(); err != nil {
 		return err
 	}
