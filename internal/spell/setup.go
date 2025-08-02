@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // PrimeCachedDB 负责初始化spell模块的数据库和内存仓库
@@ -60,7 +60,7 @@ func WarmupCache() error {
 		pipe.HSet(database.Ctx, StatsKey, spell.SpellID, statsJSON)
 
 		// 准备排名数据 (spell_ranking Sorted Set)
-		pipe.ZAdd(database.Ctx, RankingKey, &redis.Z{
+		pipe.ZAdd(database.Ctx, RankingKey, redis.Z{
 			Score:  spell.RankScore, // 使用RankScore作为排名依据
 			Member: spell.SpellID,
 		})

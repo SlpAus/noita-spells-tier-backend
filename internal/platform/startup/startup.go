@@ -45,7 +45,7 @@ func RebuildCache() error {
 	if err := spell.WarmupCache(); err != nil {
 		return err
 	}
-	if err := vote.ApplyIncrementalVotes(); err != nil {
+	if err := vote.RebuildAndApplyVotes(); err != nil {
 		return err
 	}
 

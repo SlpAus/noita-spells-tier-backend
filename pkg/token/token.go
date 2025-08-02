@@ -52,33 +52,24 @@ func GenerateVoteSignature(payload TokenPayload) (string, error) {
 }
 
 // ValidateVoteSignature 验证一个给定的payload和签名是否匹配。
-// 在第二阶段，此函数将直接返回成功，以方便开发和测试。
 func ValidateVoteSignature(payload TokenPayload, signatureB64 string) bool {
-	// --- 第三阶段将启用的真实验证逻辑 ---
-	/*
-		// 1. 将传入的payload重新序列化，以确保与签名时的数据格式完全一致
-		payloadBytes, err := json.Marshal(payload)
-		if err != nil {
-			return false // 如果序列化失败，则验证失败
-		}
+	// 1. 将传入的payload重新序列化，以确保与签名时的数据格式完全一致
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return false // 如果序列化失败，则验证失败
+	}
 
-		// 2. 重新计算预期的签名
-		mac := hmac.New(sha256.New, secretKey)
-		mac.Write(payloadBytes)
-		expectedSignature := mac.Sum(nil)
+	// 2. 重新计算预期的签名
+	mac := hmac.New(sha256.New, secretKey)
+	mac.Write(payloadBytes)
+	expectedSignature := mac.Sum(nil)
 
-		// 3. 解码前端传来的签名
-		actualSignature, err := base64.RawURLEncoding.DecodeString(signatureB64)
-		if err != nil {
-			return false // 签名解码失败
-		}
+	// 3. 解码前端传来的签名
+	actualSignature, err := base64.RawURLEncoding.DecodeString(signatureB64)
+	if err != nil {
+		return false // 签名解码失败
+	}
 
-		// 4. 使用 hmac.Equal 进行安全的、时间恒定的比较，防止时序攻击
-		return hmac.Equal(expectedSignature, actualSignature)
-	*/
-
-	// --- 第二阶段的占位符逻辑 ---
-	// 为了方便开发，我们暂时跳过所有验证，直接返回 true。
-	fmt.Printf("警告: 签名验证被跳过 (开发模式)。Payload: %+v, Signature: %s\n", payload, signatureB64)
-	return true
+	// 4. 使用 hmac.Equal 进行安全的、时间恒定的比较，防止时序攻击
+	return hmac.Equal(expectedSignature, actualSignature)
 }

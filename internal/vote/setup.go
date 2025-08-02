@@ -40,7 +40,7 @@ func initializeEloTracker() error {
 	return globalEloTracker.Reset(nil, scores)
 }
 
-// PrimeModule 负责初始化vote模块的所有部分：数据库、用户同步和辅助设施。
+// PrimeModule 负责初始化vote模块的所有部分：数据库、用户同步和辅助组件。
 func PrimeModule() error {
 	// 1. 迁移自己的表结构
 	if err := database.DB.AutoMigrate(&Vote{}); err != nil {
@@ -58,7 +58,13 @@ func PrimeModule() error {
 		return fmt.Errorf("将用户同步到user模块失败: %w", err)
 	}
 
-	// 3. 初始化ELO分数追踪器
+	// 3. 初始化内部辅助组件
+	if err := InitializeReplayDefense(); err != nil {
+		return fmt.Errorf("初始化重放检测器失败: %w", err)
+	}
+	if err := RebuildIPVoteCache(); err != nil {
+		return fmt.Errorf("初始化IP统计器失败: %w", err)
+	}
 	if err := initializeEloTracker(); err != nil {
 		return fmt.Errorf("初始化ELO追踪器失败: %w", err)
 	}
@@ -75,6 +81,22 @@ func StartVoteProcessor(gracefulHandle, forcefulHandle *lifecycle.Handle) error 
 
 	initializeProcessor(startID)
 	go startProcessor(gracefulHandle, forcefulHandle)
+
+	return nil
+}
+
+// RebuildAndApplyVotes 重置内部的两个辅助组件，并处理上次快照以来的增量投票
+func RebuildAndApplyVotes() error {
+	if err := InitializeReplayDefense(); err != nil {
+		return fmt.Errorf("重置重放检测器失败: %w", err)
+	}
+	if err := RebuildIPVoteCache(); err != nil {
+		return fmt.Errorf("重置IP统计器失败: %w", err)
+	}
+
+	if err := ApplyIncrementalVotes(); err != nil {
+		return fmt.Errorf("处理增量投票失败: %w", err)
+	}
 
 	return nil
 }

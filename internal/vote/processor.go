@@ -13,7 +13,7 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // voteMinHeap 实现了 container/heap 接口
@@ -412,8 +412,8 @@ func (vp *voteProcessor) applyVoteToRepository(vote Vote) error {
 		statsBJSON, _ := json.Marshal(statsB)
 		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellA_ID, statsAJSON)
 		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellB_ID, statsBJSON)
-		pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsA.RankScore, Member: vote.SpellA_ID})
-		pipe.ZAdd(database.Ctx, spell.RankingKey, &redis.Z{Score: statsB.RankScore, Member: vote.SpellB_ID})
+		pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsA.RankScore, Member: vote.SpellA_ID})
+		pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsB.RankScore, Member: vote.SpellB_ID})
 		pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
 		pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
 		_, err = pipe.Exec(database.Ctx)
@@ -472,11 +472,11 @@ func rebuildAllRankScores(tx *eloTrackerTx, vote Vote, currentStatsA, currentSta
 
 	// 4. 原子地将所有更新写回Redis
 	pipe := database.RDB.TxPipeline()
-	newRanking := make([]*redis.Z, 0, len(updatedStats))
+	newRanking := make([]redis.Z, 0, len(updatedStats))
 	for id, stats := range updatedStats {
 		statsJSON, _ := json.Marshal(stats)
 		pipe.HSet(database.Ctx, spell.StatsKey, id, statsJSON)
-		newRanking = append(newRanking, &redis.Z{Score: stats.RankScore, Member: id})
+		newRanking = append(newRanking, redis.Z{Score: stats.RankScore, Member: id})
 	}
 	pipe.ZAdd(database.Ctx, spell.RankingKey, newRanking...) // 批量更新排名
 	pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)

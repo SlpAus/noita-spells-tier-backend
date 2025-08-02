@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // RDB 是一个全局的Redis客户端实例，供项目其他部分使用
@@ -23,6 +23,7 @@ func InitRedis() {
 		Addr:     "localhost:6379",
 		Password: "",
 		DB:       0,
+		Protocol: 2,
 	})
 
 	// 使用Ping命令来测试连接是否成功

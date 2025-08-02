@@ -8,7 +8,7 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // ApplyIncrementalVotes 在缓存重建时，处理自上次快照以来的所有新投票
@@ -117,11 +117,11 @@ func ApplyIncrementalVotes() error {
 
 	// 6. 使用Pipeline一次性将所有更新后的数据写回Redis
 	pipe := database.RDB.TxPipeline()
-	newRanking := make([]*redis.Z, 0, len(inMemoryStats))
+	newRanking := make([]redis.Z, 0, len(inMemoryStats))
 	for id, stats := range inMemoryStats {
 		statsJSON, _ := json.Marshal(stats)
 		pipe.HSet(database.Ctx, spell.StatsKey, id, statsJSON)
-		newRanking = append(newRanking, &redis.Z{Score: stats.RankScore, Member: id})
+		newRanking = append(newRanking, redis.Z{Score: stats.RankScore, Member: id})
 	}
 	pipe.ZAdd(database.Ctx, spell.RankingKey, newRanking...)
 	if totalVotesIncrement > 0 {

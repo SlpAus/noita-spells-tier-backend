@@ -24,9 +24,8 @@ type Vote struct {
 	SpellB_ID string
 	Result    VoteResult
 
-	// *** 已修改：为UserIdentifier添加索引 ***
-	UserIdentifier string `gorm:"index"` // 用户的UUID
+	UserIdentifier string `gorm:"index"`
 	UserIP         string
 	Multiplier     float64
-	VoteTime       time.Time
+	VoteTime       time.Time `gorm:"index"`
 }
