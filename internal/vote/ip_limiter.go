@@ -201,21 +201,23 @@ func IncrementIPVoteCount(ip string, voteTime time.Time) (int64, *IPVoteCompensa
 // 这个方法应该在整个业务流程（例如，SQLite写入等）都成功后调用。
 func (c *IPVoteCompensator) Commit() {
 	c.committed = true
+	ipMutex.RUnlock()
 }
 
 // RollbackUnlessCommitted 是一个用于defer调用的关键方法。
 // 如果Commit()没有被调用，它会自动执行对Redis的补偿操作（删除之前添加的成员）。
 func (c *IPVoteCompensator) RollbackUnlessCommitted() {
 	// 如果事务已被提交，则无需做任何事
-	defer ipMutex.RUnlock()
-
 	if c.committed {
 		return
 	}
 
+	defer ipMutex.RUnlock()
+
 	if !database.IsRedisHealthy() {
-		// 只记录错误，此时主流程已经失败了
+		// TODO: 这会导致多记一个次数
 		fmt.Printf("严重警告: IP投票计数补偿操作时Redis不健康。 IP: %s, Member: %s", c.ip, c.member)
+		return
 	}
 
 	// 执行补偿：从有序集合中移除本次投票对应的成员

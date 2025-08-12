@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/SlpAus/noita-spells-tier-backend/api"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/shutdown"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
@@ -41,17 +40,19 @@ func main() {
 
 	// --- 4. 启动所有后台工作进程 ---
 	// 为每个需要优雅停机的后台服务注册，并获取其生命周期句柄
-	userHandle, err := gracefulManager.NewServiceHandle("UserActivationWorker")
-	if err != nil {
-		panic(err)
-	}
-	go user.StartActivationWorker(userHandle)
 
-	spellHandle, err := gracefulManager.NewServiceHandle("BackupScheduler")
+	// TODO: 不再使用user.StartActivationWorker
+	// userHandle, err := gracefulManager.NewServiceHandle("UserActivationWorker")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// go user.StartActivationWorker(userHandle)
+
+	backupHandle, err := gracefulManager.NewServiceHandle("BackupScheduler")
 	if err != nil {
 		panic(err)
 	}
-	go spell.StartBackupScheduler(spellHandle)
+	go backup.StartBackupScheduler(backupHandle)
 
 	voteGracefulHandle, err := gracefulManager.NewServiceHandle("VoteProcessor")
 	if err != nil {
@@ -65,7 +66,11 @@ func main() {
 		panic(fmt.Sprintf("启动 Vote Processor 失败: %v", err))
 	}
 
-	go health.StartRedisHealthCheck()
+	healthHandle, err := forcefulManager.NewServiceHandle("HealthChecker")
+	if err != nil {
+		panic(err)
+	}
+	go health.StartRedisHealthCheck(healthHandle)
 
 	// --- 5. 创建并配置Web服务器 ---
 	r := gin.Default()

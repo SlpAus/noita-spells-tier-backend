@@ -13,12 +13,12 @@ import (
 
 const (
 	// StatsKey 是一个Redis Hash，存储所有法术的动态统计数据
-	StatsKey = "spell_stats"
+	StatsKey = "spell:stats"
 	// RankingKey 是一个Redis Sorted Set，用于按分数实时排序法术
-	RankingKey = "spell_ranking"
+	RankingKey = "spell:ranking"
 )
 
-// SpellStats 定义了在Redis spell_stats Hash中存储的法术动态数据
+// SpellStats 定义了在Redis spell:stats Hash中存储的法术动态数据
 type SpellStats struct {
 	Score     float64 `json:"score"`
 	Total     float64 `json:"total"`

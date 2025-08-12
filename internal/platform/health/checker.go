@@ -8,6 +8,7 @@ import (
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/startup"
+	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
 )
 
 const (
@@ -96,15 +97,19 @@ func PerformCheck() {
 }
 
 // StartRedisHealthCheck 启动一个后台Goroutine来定期、阻塞式地执行健康检查。
-func StartRedisHealthCheck() {
+// 接收一个lifecycle.Handle来管理其生命周期。
+func StartRedisHealthCheck(handle *lifecycle.Handle) {
+	defer handle.Close()
+
 	fmt.Println("Redis高级健康检查器已启动。")
-	// 使用 time.Timer 实现阻塞式循环
-	timer := time.NewTimer(checkInterval)
-	defer timer.Stop()
 
 	for {
-		<-timer.C                  // 等待定时器触发
-		PerformCheck()             // 执行检查
-		timer.Reset(checkInterval) // 重置定时器，从现在开始重新计时
+		if err := handle.Sleep(checkInterval); err != nil {
+			fmt.Printf("健康检查器: 休眠被中断，正在关闭...\n")
+			return
+		}
+
+		// 执行检查逻辑
+		PerformCheck()
 	}
 }

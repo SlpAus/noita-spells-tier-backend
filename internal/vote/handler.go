@@ -34,7 +34,14 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	// 2. 防重放攻击检查
+	// 2. 签名验证
+	payloadToValidate := token.TokenPayload{PairID: body.PairID, SpellAID: body.SpellAID, SpellBID: body.SpellBID}
+	if !token.ValidateVoteSignature(payloadToValidate, body.Signature) {
+		c.JSON(http.StatusOK, gin.H{"message": "投票已记录"}) // 静默失败
+		return
+	}
+
+	// 3. 防重放攻击检查
 	isReplay, err := CheckAndUsePairID(body.PairID)
 	if err != nil {
 		fmt.Printf("检查PairID %s 时发生错误: %v\n", body.PairID, err)
@@ -42,13 +49,6 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 	if isReplay {
-		c.JSON(http.StatusOK, gin.H{"message": "投票已记录"}) // 静默失败
-		return
-	}
-
-	// 3. 签名验证
-	payloadToValidate := token.TokenPayload{PairID: body.PairID, SpellAID: body.SpellAID, SpellBID: body.SpellBID}
-	if !token.ValidateVoteSignature(payloadToValidate, body.Signature) {
 		c.JSON(http.StatusOK, gin.H{"message": "投票已记录"}) // 静默失败
 		return
 	}
@@ -67,9 +67,9 @@ func SubmitVote(c *gin.Context) {
 	// 5. 计算投票权重
 	multiplier := calculateMultiplierForCount(count)
 
-	// 6. 异步激活用户
+	// 6. 验证用户
 	userID := c.GetString(user.UserIDKey)
-	if !user.QueueUserActivationIfValid(userID) {
+	if !user.IsValidUUID(userID) {
 		userID = ""
 	}
 

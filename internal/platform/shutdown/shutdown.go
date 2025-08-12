@@ -9,8 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
+)
+
+const (
+	httpTimeout     = 15 * time.Second
+	gracefulTimeout = 30 * time.Second
+	forcefulTimeout = 1 * time.Second
 )
 
 // Coordinator 负责编排应用程序的优雅停机流程。
@@ -37,8 +43,7 @@ func (c *Coordinator) ListenForSignalsAndShutdown(server *http.Server) {
 	<-sigChan
 	fmt.Println("\n收到关闭信号，开始优雅停机...")
 
-	// 关闭HTTP服务器，允许正在进行的请求完成
-	httpTimeout := 15 * time.Second
+	// 第一步：关闭HTTP服务
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpTimeout)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -47,33 +52,30 @@ func (c *Coordinator) ListenForSignalsAndShutdown(server *http.Server) {
 		fmt.Println("Gin服务器已关闭。")
 	}
 
-	// --- 阶段一: 优雅停机 ---
-	gracefulTimeout := 30 * time.Second
-	fmt.Printf("第一阶段停机：等待最多 %v 以完成任务...\n", gracefulTimeout)
-	// 广播第一阶段停机信号
+	// 第二步：关闭第一阶段服务
+	fmt.Println("开始关闭第一阶段服务（优雅停机）...")
 	c.GracefulManager.Shutdown()
-
-	// 等待所有后台服务完成
-	remainingServices := c.GracefulManager.WaitWithTimeout(gracefulTimeout)
-	if len(remainingServices) == 0 {
-		fmt.Println("所有服务已在第一阶段优雅关闭。")
-	} else {
-		// --- 阶段二: 强制停机 ---
-		forcefulTimeout := 1 * time.Second
-		fmt.Printf("第一阶段超时。发送第二停机信号，强制退出 (最多等待 %v)...\n", forcefulTimeout)
-		// 广播第二阶段停机信号
-		c.ForcefulManager.Shutdown()
-		// 在这里，我们不再等待，因为强制信号意味着“立即停止，不要再执行任何操作”
-		// 服务的循环应该在接收到强制信号后立刻退出
-		c.ForcefulManager.WaitWithTimeout(forcefulTimeout)
+	remainingGraceful := c.GracefulManager.WaitWithTimeout(gracefulTimeout)
+	if len(remainingGraceful) > 0 {
+		fmt.Printf("警告：以下优雅停机服务未能按时退出: %v\n", remainingGraceful)
 	}
+	fmt.Println("第一阶段服务关闭完成.")
 
-	// --- 最终步骤 ---
-	fmt.Println("正在执行最终快照...")
-	if err := spell.CreateConsistentSnapshotInDB(context.Background()); err != nil {
-		fmt.Printf("最终快照失败: %v\n", err)
+	// 第三步：关闭第二阶段服务
+	fmt.Println("开始关闭第二阶段服务（强制停机）...")
+	c.ForcefulManager.Shutdown()
+	remainingForceful := c.ForcefulManager.WaitWithTimeout(forcefulTimeout)
+	if len(remainingForceful) > 0 {
+		fmt.Printf("警告：以下强制停机服务未能按时退出: %v\n", remainingForceful)
+	}
+	fmt.Println("第二阶段服务关闭完成.")
+
+	// 第四步：创建最终数据快照
+	fmt.Println("正在执行停机时快照...")
+	if err := backup.CreateConsistentSnapshotInDB(context.Background()); err != nil {
+		fmt.Printf("停机时快照失败: %v\n", err)
 	} else {
-		fmt.Println("最终快照成功。")
+		fmt.Println("停机时快照成功。")
 	}
 
 	fmt.Println("优雅停机完成。")

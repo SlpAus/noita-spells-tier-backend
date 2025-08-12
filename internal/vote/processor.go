@@ -12,6 +12,7 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
 	"github.com/redis/go-redis/v9"
 )
@@ -57,6 +58,7 @@ func initializeProcessor(startID uint) {
 // StartProcessor 启动VoteProcessor的主处理循环和巡查员
 func startProcessor(gracefulHandle, forcefulHandle *lifecycle.Handle) {
 	defer gracefulHandle.Close()
+	defer forcefulHandle.Close()
 	fmt.Println("投票处理器 (Vote Processor) 已启动。")
 
 	// 立刻收集缺失的投票
@@ -343,10 +345,8 @@ func (vp *voteProcessor) checkAndRequeueMissedVotes(ctx context.Context) {
 
 // applyVoteToRepository 将单个投票的计算结果原子地更新到Redis和内存仓库
 func (vp *voteProcessor) applyVoteToRepository(vote Vote) error {
-	if vote.Result == ResultSkip {
-		// 对于跳过的投票，我们只需要原子地更新检查点
-		return database.RDB.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0).Err()
-	}
+	// hack: 目前spell锁的范围会完全阻止常规流程和恢复流程的冲突
+	// 如果未来不再是这样，vote模块就需要自己的锁
 
 	// 1. 加写锁，保护对Redis和内存权重树的联合更新
 	spell.LockRepository()
@@ -357,6 +357,28 @@ func (vp *voteProcessor) applyVoteToRepository(vote Vote) error {
 	vp.processMutex.Unlock()
 	if currentID > vote.ID {
 		return nil
+	}
+
+	if vote.Result == ResultSkip {
+		// 进入user临界区
+		user.LockRepository()
+		defer user.UnlockRepository()
+
+		// 1. 获得并更新用户统计
+		userStats, err := getNewUserStats(vote)
+		if err != nil {
+			return err
+		}
+
+		// 2. 更新检查点
+		pipe := database.RDB.TxPipeline()
+		pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
+
+		// 3. 更新用户统计
+		updateUserStats(pipe, userStats)
+
+		_, err = pipe.Exec(database.Ctx)
+		return err
 	}
 
 	// 2. 从Redis获取当前统计数据
@@ -401,22 +423,7 @@ func (vp *voteProcessor) applyVoteToRepository(vote Vote) error {
 	if boundaryChanged {
 		err = rebuildAllRankScores(eloTrackerTx, vote, statsA, statsB)
 	} else {
-		// 6. 正常更新
-		// 计算新的RankScore
-		statsA.RankScore = CalculateRankScore(eloTrackerTx, statsA.Score, statsA.Total, statsA.Win)
-		statsB.RankScore = CalculateRankScore(eloTrackerTx, statsB.Score, statsB.Total, statsB.Win)
-
-		// 原子地写入Redis
-		pipe := database.RDB.TxPipeline()
-		statsAJSON, _ := json.Marshal(statsA)
-		statsBJSON, _ := json.Marshal(statsB)
-		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellA_ID, statsAJSON)
-		pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellB_ID, statsBJSON)
-		pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsA.RankScore, Member: vote.SpellA_ID})
-		pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsB.RankScore, Member: vote.SpellB_ID})
-		pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
-		pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
-		_, err = pipe.Exec(database.Ctx)
+		err = updateRankScores(eloTrackerTx, vote, statsA, statsB)
 	}
 
 	if err != nil {
@@ -470,7 +477,17 @@ func rebuildAllRankScores(tx *eloTrackerTx, vote Vote, currentStatsA, currentSta
 		updatedStats[id] = stats
 	}
 
-	// 4. 原子地将所有更新写回Redis
+	// 进入user临界区
+	user.LockRepository()
+	defer user.UnlockRepository()
+
+	// 4. 获得并更新用户统计
+	userStats, err := getNewUserStats(vote)
+	if err != nil {
+		return err
+	}
+
+	// 5. 原子地将所有更新写回Redis
 	pipe := database.RDB.TxPipeline()
 	newRanking := make([]redis.Z, 0, len(updatedStats))
 	for id, stats := range updatedStats {
@@ -479,9 +496,122 @@ func rebuildAllRankScores(tx *eloTrackerTx, vote Vote, currentStatsA, currentSta
 		newRanking = append(newRanking, redis.Z{Score: stats.RankScore, Member: id})
 	}
 	pipe.ZAdd(database.Ctx, spell.RankingKey, newRanking...) // 批量更新排名
+
 	pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
 	pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
 
+	// 6. 更新用户统计
+	updateUserStats(pipe, userStats)
+
 	_, err = pipe.Exec(database.Ctx)
 	return err
+}
+
+// updateRankScores 在ELO边界未变化时，执行常规的RankScore更新和批量写入
+func updateRankScores(tx *eloTrackerTx, vote Vote, statsA, statsB spell.SpellStats) error {
+	// 1. 计算新的RankScore
+	statsA.RankScore = CalculateRankScore(tx, statsA.Score, statsA.Total, statsA.Win)
+	statsB.RankScore = CalculateRankScore(tx, statsB.Score, statsB.Total, statsB.Win)
+
+	statsAJSON, _ := json.Marshal(statsA)
+	statsBJSON, _ := json.Marshal(statsB)
+
+	// 进入user临界区
+	user.LockRepository()
+	defer user.UnlockRepository()
+
+	// 2. 获得并更新用户统计
+	userStats, err := getNewUserStats(vote)
+	if err != nil {
+		return err
+	}
+
+	// 3. 原子地写入Redis
+	pipe := database.RDB.TxPipeline()
+	pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellA_ID, statsAJSON)
+	pipe.HSet(database.Ctx, spell.StatsKey, vote.SpellB_ID, statsBJSON)
+	pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsA.RankScore, Member: vote.SpellA_ID})
+	pipe.ZAdd(database.Ctx, spell.RankingKey, redis.Z{Score: statsB.RankScore, Member: vote.SpellB_ID})
+
+	pipe.IncrByFloat(database.Ctx, metadata.RedisTotalVotesKey, vote.Multiplier)
+	pipe.Set(database.Ctx, metadata.RedisLastProcessedVoteIDKey, vote.ID, 0)
+
+	// 4. 更新用户统计
+	updateUserStats(pipe, userStats)
+
+	_, err = pipe.Exec(database.Ctx)
+	return err
+}
+
+// updateUserStats 负责在从Redis事务中获取用户和全局的投票统计数据并更新
+func getNewUserStats(vote Vote) (map[string]user.UserStats, error) {
+	isNamedUserVote := vote.UserIdentifier != ""
+
+	// 定义需要获取统计数据的键
+	keysToFetch := []string{user.TotalStatsKey}
+	if isNamedUserVote {
+		keysToFetch = append(keysToFetch, vote.UserIdentifier)
+	}
+	// 一次性从Redis获取所有相关统计
+	statsData, err := database.RDB.HMGet(database.Ctx, user.StatsKey, keysToFetch...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("无法从Redis获取用户统计数据: %w\n", err)
+	}
+
+	// 解析、更新准备写回的数据
+	statsMap := make(map[string]user.UserStats)
+
+	totalStats := user.UserStats{}
+	if statsData[0] == nil {
+		return nil, fmt.Errorf("从Redis获取用户总统计数据时出错: %w\n", err) // 不应为nil
+	}
+	_ = json.Unmarshal([]byte(statsData[0].(string)), &totalStats)
+	updateStatsByResult(&totalStats, vote.Result)
+	statsMap[user.TotalStatsKey] = totalStats
+
+	if isNamedUserVote {
+		thisUserStats := user.UserStats{}
+		if statsData[1] != nil {
+			_ = json.Unmarshal([]byte(statsData[1].(string)), &thisUserStats)
+		}
+		updateStatsByResult(&thisUserStats, vote.Result)
+		statsMap[vote.UserIdentifier] = thisUserStats
+	}
+
+	return statsMap, nil
+}
+
+// updateStatsByResult 是一个辅助函数，根据投票结果更新UserStats对象
+func updateStatsByResult(stats *user.UserStats, result VoteResult) {
+	switch result {
+	case ResultAWins, ResultBWins:
+		stats.Wins++
+	case ResultDraw:
+		stats.Draw++
+	case ResultSkip:
+		stats.Skip++
+	}
+}
+
+// updateUserStats 负责在Redis事务中应用用户和全局投票统计数据的更新
+func updateUserStats(pipe redis.Pipeliner, userStats map[string]user.UserStats) {
+	statsMap := make(map[string]interface{})
+
+	for key, stats := range userStats {
+		// 处理用户个人统计
+		if key != user.TotalStatsKey {
+			// 更新用户排名
+			totalUserVotes := stats.Wins + stats.Draw + stats.Skip
+			pipe.ZAdd(database.Ctx, user.RankingKey, redis.Z{Score: float64(totalUserVotes), Member: key})
+			// 标记用户为“脏”，用于增量备份
+			pipe.SAdd(database.Ctx, user.DirtySetKey, key)
+		}
+
+		// 处理全局统计
+		statsJSON, _ := json.Marshal(stats)
+		statsMap[key] = statsJSON
+	}
+
+	// 将更新后的统计数据批量加入事务
+	pipe.HSet(database.Ctx, user.StatsKey, statsMap)
 }

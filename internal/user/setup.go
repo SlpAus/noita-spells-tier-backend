@@ -1,17 +1,26 @@
 package user
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"github.com/redis/go-redis/v9"
 )
 
-// PrimeDB 负责初始化user模块的数据库部分，仅迁移表结构。
-// 缓存预热将由更高层的逻辑（例如vote模块）在同步完用户数据后触发。
-func PrimeDB() error {
+// PrimeCachedDB 是user模块在应用启动时调用的主设置函数。
+// 它负责迁移数据库表，并调用WarmupCache来初始化Redis缓存。
+func PrimeCachedDB() (err error) {
+	// 迁移 users 表
 	if err := migrateDB(); err != nil {
 		return err
 	}
+
+	// 初始化缓存
+	if err = WarmupCache(); err != nil {
+		return fmt.Errorf("user模块缓存预热失败: %w", err)
+	}
+
 	return nil
 }
 
@@ -24,36 +33,97 @@ func migrateDB() error {
 	return nil
 }
 
-// WarmupCache 从SQLite加载所有已知的用户UUID，并预热到Redis的Set中
+// WarmupCache 从SQLite数据库中读取所有用户数据，并用其重建Redis中的缓存。
+// 这个过程是破坏性的，会先清空旧的缓存数据。
+// 注意：此函数不包含锁，调用方需要确保在安全的时机（如单线程启动或重建大范围锁下）调用。
 func WarmupCache() error {
-	// 步骤1：无论如何，总是先清空旧的缓存，确保一个干净的开始
-	fmt.Println("正在清空旧的用户缓存...")
-	if err := database.RDB.Del(database.Ctx, KnownUsersKey).Err(); err != nil {
-		return fmt.Errorf("无法清空旧的用户缓存: %w", err)
+	fmt.Println("开始预热user模块缓存...")
+
+	// 1. 清空所有相关的Redis键
+	pipe := database.RDB.Pipeline()
+	pipe.Del(database.Ctx, StatsKey)
+	pipe.Del(database.Ctx, RankingKey)
+	pipe.Del(database.Ctx, DirtySetKey)
+	if _, err := pipe.Exec(database.Ctx); err != nil {
+		return fmt.Errorf("清空旧的user缓存失败: %w", err)
+	}
+	fmt.Println("旧的user缓存已清空.")
+
+	// 2. 初始化社区总票数累加器
+	totalStats := UserStats{}
+
+	// 3. 分批从SQLite读取数据并写入Redis
+	const batchSize = 10000
+
+	var batch []User
+	lastID := ""
+	for {
+		// 从数据库中分批读取用户
+		if err := database.DB.Order("uuid asc").Limit(batchSize).Where("uuid > ?", lastID).Find(&batch).Error; err != nil {
+			return fmt.Errorf("从数据库分批读取用户失败 (uuid > %s): %w", lastID, err)
+		}
+
+		// 如果没有更多用户，则结束循环
+		if len(batch) == 0 {
+			break
+		}
+
+		// 准备当前批次写入Redis的数据
+		statsPayload := make(map[string]interface{})
+		rankingPayload := make([]redis.Z, 0, len(batch))
+
+		for _, user := range batch {
+			// 准备 user:stats (Hash) 的数据
+			stats := UserStats{
+				Wins: user.WinsCount,
+				Draw: user.DrawCount,
+				Skip: user.SkipCount,
+			}
+			statsJSON, err := json.Marshal(stats)
+			if err != nil {
+				// 理论上这个错误不应该发生
+				return fmt.Errorf("警告：序列化用户 %s 的统计数据失败: %w", user.UUID, err)
+			}
+			statsPayload[user.UUID] = string(statsJSON)
+
+			// 准备 user:ranking (Sorted Set) 的数据
+			totalVotes := float64(user.WinsCount + user.DrawCount + user.SkipCount)
+			rankingPayload = append(rankingPayload, redis.Z{
+				Score:  totalVotes,
+				Member: user.UUID,
+			})
+
+			// 累加到社区总票数
+			totalStats.Wins += user.WinsCount
+			totalStats.Draw += user.DrawCount
+			totalStats.Skip += user.SkipCount
+		}
+
+		// 使用Pipeline写入当前批次的数据
+		if len(statsPayload) > 0 {
+			pipe := database.RDB.Pipeline()
+			pipe.HSet(database.Ctx, StatsKey, statsPayload)
+			pipe.ZAdd(database.Ctx, RankingKey, rankingPayload...)
+			if _, err := pipe.Exec(database.Ctx); err != nil {
+				return fmt.Errorf("写入批次到Redis失败 (uuid > %s): %w", lastID, err)
+			}
+		}
+
+		// 更新 lastID 为当前批次的最后一条记录的ID
+		lastID = batch[len(batch)-1].UUID
+
+		batch = batch[:0]
 	}
 
-	var users []User
-	// 步骤2：从SQLite读取所有用户的UUID
-	if err := database.DB.Select("uuid").Find(&users).Error; err != nil {
-		return fmt.Errorf("无法从SQLite读取用户UUID: %w", err)
+	// 4. 将最终的社区总票数写入Redis
+	totalStatsJSON, err := json.Marshal(totalStats)
+	if err != nil {
+		return fmt.Errorf("序列化社区总统计数据失败: %w", err)
+	}
+	if err := database.RDB.HSet(database.Ctx, StatsKey, TotalStatsKey, string(totalStatsJSON)).Err(); err != nil {
+		return fmt.Errorf("写入社区总统计数据到Redis失败: %w", err)
 	}
 
-	if len(users) == 0 {
-		fmt.Println("无现有用户数据，无需预热用户缓存。")
-		return nil
-	}
-
-	// 步骤3：将从SQLite读到的用户批量添加到Redis
-	userUUIDs := make([]interface{}, len(users))
-	for i, u := range users {
-		userUUIDs[i] = u.UUID
-	}
-
-	// 此时只需要执行SAdd即可
-	if err := database.RDB.SAdd(database.Ctx, KnownUsersKey, userUUIDs...).Err(); err != nil {
-		return fmt.Errorf("预热用户UUID到Redis失败: %w", err)
-	}
-
-	fmt.Printf("成功预热 %d 个用户UUID到Redis。\n", len(users))
+	fmt.Println("user模块缓存预热完成.")
 	return nil
 }

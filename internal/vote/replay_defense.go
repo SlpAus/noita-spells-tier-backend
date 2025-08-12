@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
+	"gorm.io/gorm"
 )
 
 // --- 数据模型 ---
@@ -49,7 +50,7 @@ func InitializeReplayDefense() error {
 	if err := database.DB.AutoMigrate(&UsedPairID{}); err != nil {
 		return fmt.Errorf("无法迁移PairID表: %w", err)
 	}
-	if err := database.DB.Exec("DELETE FROM used_pair_ids").Error; err != nil {
+	if err := database.DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&UsedPairID{}).Error; err != nil {
 		return fmt.Errorf("擦除旧的SQLite PairID表失败: %w", err)
 	}
 
@@ -110,40 +111,40 @@ func insertNewPairID(pairID string) (bool, error) {
 		return true, nil
 	}
 
-	// 1. 开启SQLite事务
-	tx := database.DB.Begin()
-	if tx.Error != nil {
-		return false, fmt.Errorf("无法开始SQLite事务: %w", tx.Error)
-	}
-	defer tx.Rollback() // 默认回滚，只有在最后才提交
-
-	// 2. 在事务中插入SQLite
-	newID := UsedPairID{PairID: pairID}
-	if err := tx.Create(&newID).Error; err != nil {
-		if database.IsDuplicateKeyError(err) {
-			// 这几乎是不可能的，说明Redis中的状态曾丢失
-			// 尽管马上要触发重建了，我们可以信任SQLite
-			return true, nil
-		}
-		return false, fmt.Errorf("写入SQLite失败: %w", err)
-	}
-
-	// 3. 开启Redis事务
-	pipe := database.RDB.TxPipeline()
-	pipe.BFAdd(database.Ctx, bloomFilterKey, pairID)
-	pipe.SAdd(database.Ctx, cacheSetKey, pairID)
-	_, err := pipe.Exec(database.Ctx)
-
-	if err != nil {
-		// Redis失败，SQLite事务将自动回滚
-		return false, fmt.Errorf("写入Redis失败: %w", err)
-	}
+	redisWriteSucceeded := false
+	var err error
 
 	const maxRetry = 3
 	const delay = 50 * time.Millisecond
-	// 4. Redis成功，尝试提交SQLite事务
 	for i := 0; i < maxRetry; i++ { // 短间隔重试
-		err := tx.Commit().Error
+		err = database.DB.Transaction(func(tx *gorm.DB) error {
+			// 2. 在事务中插入SQLite
+			newID := UsedPairID{PairID: pairID}
+			if err := tx.Create(&newID).Error; err != nil {
+				if database.IsDuplicateKeyError(err) {
+					// 这几乎是不可能的，说明Redis中的状态曾丢失
+					// 尽管马上要触发重建了，我们可以信任SQLite
+					return nil
+				}
+				return err
+			}
+
+			if !redisWriteSucceeded {
+				// 3. 开启Redis事务
+				pipe := database.RDB.TxPipeline()
+				pipe.BFAdd(database.Ctx, bloomFilterKey, pairID)
+				pipe.SAdd(database.Ctx, cacheSetKey, pairID)
+				_, err := pipe.Exec(database.Ctx)
+
+				if err != nil {
+					// Redis失败，SQLite事务将自动回滚
+					return err
+				}
+				redisWriteSucceeded = true
+			}
+
+			return nil
+		})
 		if err == nil {
 			return false, nil // 完美成功
 		} else if !database.IsRetryableError(err) {
@@ -152,11 +153,15 @@ func insertNewPairID(pairID string) (bool, error) {
 		time.Sleep(delay)
 	}
 
-	// 这是一个严重问题，SQLite提交失败但Redis已写入
-	fmt.Printf("严重告警: SQLite提交失败但Redis已写入, PairID: %s\n", pairID)
-	// 尽管这里出现内部不一致，应当以不存在的结果静默返回成功
-	// 如果后续Redis不崩溃，则此PairID已不可再次使用，如果后续Redis崩溃，则无法阻止此PairID被重复使用
-	return false, nil
+	if redisWriteSucceeded {
+		// 这是一个严重问题，SQLite提交失败但Redis已写入
+		fmt.Printf("严重告警: SQLite提交失败但Redis已写入, PairID: %s\n", pairID)
+		// 尽管这里出现内部不一致，应当以不存在的结果静默返回成功
+		// 如果后续Redis不崩溃，则此PairID已不可再次使用，如果后续Redis崩溃，则无法阻止此PairID被重复使用
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 // RecoverReplayDefense 从SQLite重建布隆过滤器和缓存
@@ -190,6 +195,10 @@ func RecoverReplayDefense() error {
 	for i := 1; ; i++ {
 		if err := database.DB.Model(&UsedPairID{}).Where("pair_id > ?", lastProcessedID).Order("pair_id asc").Limit(batchSize).Pluck("pair_id", &batch).Error; err != nil {
 			return fmt.Errorf("分批从SQLite读取PairID失败 (batch %d): %w", i, err)
+		}
+
+		if len(batch) == 0 {
+			break
 		}
 
 		// 将string切片转换为interface{}切片

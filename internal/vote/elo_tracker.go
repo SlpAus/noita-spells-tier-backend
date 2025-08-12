@@ -152,22 +152,24 @@ func (et *eloTracker) BeginUpdate() *eloTrackerTx {
 // 这个方法应该在所有关联操作（如Redis写入）都成功后，在函数返回前调用。
 func (tx *eloTrackerTx) Commit() {
 	tx.committed = true
+	tx.target.mu.Unlock()
+	tx.target = nil
 }
 
 // RollbackUnlessCommitted 是一个用于defer调用的关键方法。
 // 它会检查事务是否被提交。如果未提交，则用备份的数据恢复原始对象。
 // 无论如何，它最终都会释放原始对象上的写锁。
 func (tx *eloTrackerTx) RollbackUnlessCommitted() {
-	// 无论如何，函数退出时必须解锁
+	if tx.committed {
+		return
+	}
+
 	defer func() {
 		tx.target.mu.Unlock()
 		tx.target = nil
 	}()
 
-	// 如果事务未被标记为成功提交，则执行回滚
-	if !tx.committed {
-		// 使用备份的数据覆盖被修改的原始对象
-		tx.target.data = tx.backup
-		fmt.Println("eloTracker: 事务未提交，状态已自动回滚。")
-	}
+	// 使用备份的数据覆盖被修改的原始对象
+	tx.target.data = tx.backup
+	fmt.Println("eloTracker: 事务未提交，状态已自动回滚。")
 }

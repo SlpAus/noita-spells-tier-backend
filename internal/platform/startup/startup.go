@@ -13,11 +13,10 @@ import (
 func InitializeApplication() error {
 	fmt.Println("开始应用首次初始化...")
 
-	// *** 已修改：调用 PrimeCachedDB ***
 	if err := metadata.PrimeCachedDB(); err != nil {
 		return err
 	}
-	if err := user.PrimeDB(); err != nil {
+	if err := user.PrimeCachedDB(); err != nil {
 		return err
 	}
 	if err := spell.PrimeCachedDB(); err != nil {
@@ -35,17 +34,30 @@ func InitializeApplication() error {
 func RebuildCache() error {
 	fmt.Println("开始缓存热重建...")
 
-	// *** 新增：重建metadata缓存 ***
 	if err := metadata.WarmupCache(); err != nil {
 		return err
 	}
-	if err := user.WarmupCache(); err != nil {
-		return err
-	}
-	if err := spell.WarmupCache(); err != nil {
-		return err
-	}
-	if err := vote.RebuildAndApplyVotes(); err != nil {
+
+	err := func() error {
+		spell.LockRepository()
+		defer spell.UnlockRepository()
+		if err := spell.WarmupCache(); err != nil {
+			return err
+		}
+
+		user.LockRepository()
+		defer user.UnlockRepository()
+		if err := user.WarmupCache(); err != nil {
+			return err
+		}
+
+		if err := vote.RebuildAndApplyVotes(); err != nil {
+			return err
+		}
+		return nil
+	}()
+
+	if err != nil {
 		return err
 	}
 

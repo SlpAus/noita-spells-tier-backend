@@ -10,8 +10,8 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // --- Service-Level Data Transfer Objects (DTOs) ---
@@ -66,38 +66,51 @@ func getRankedSpellsFromDB() ([]RankedSpellDTO, error) {
 
 // GetRankedSpells 从Redis中获取完整的、已排序的法术列表
 func GetRankedSpells() ([]RankedSpellDTO, error) {
+	// 服务降级：如果Redis不健康，使用SQLite中的快照数据
 	if !database.IsRedisHealthy() {
 		return getRankedSpellsFromDB()
 	}
 
-	// 1. 从Sorted Set获取所有法术ID，按分数从高到低排序
-	spellIDs, err := database.RDB.ZRevRange(database.Ctx, RankingKey, 0, -1).Result()
+	// 1. 使用 TxPipeline 原子地从Redis获取所需的排行信息和动态数据
+	pipe := database.RDB.TxPipeline()
+	spellIDsCmd := pipe.ZRevRange(database.Ctx, RankingKey, 0, -1)
+	spellStatsCmd := pipe.HGetAll(database.Ctx, StatsKey)
+	_, err := pipe.Exec(database.Ctx)
+
 	if err != nil {
-		return nil, fmt.Errorf("无法从Redis获取排行榜ID: %w", err)
+		return nil, fmt.Errorf("无法从Redis获取排行信息: %w", err)
 	}
+
+	// 2. 成功执行 TxPipeline 后，解析从Redis获得的数据
+	spellIDs, err := spellIDsCmd.Result()
+	if err != nil {
+		return nil, fmt.Errorf("无法从Redis批量获取法术排行: %w", err)
+	}
+
 	if len(spellIDs) == 0 {
 		return []RankedSpellDTO{}, nil
 	}
 
-	// 2. 从Redis批量获取动态统计数据
-	statsJSONs, err := database.RDB.HMGet(database.Ctx, StatsKey, spellIDs...).Result()
+	spellStats, err := spellStatsCmd.Result()
 	if err != nil {
-		return nil, fmt.Errorf("无法从Redis批量获取法术数据: %w", err)
+		return nil, fmt.Errorf("无法从Redis批量获取法术动态数据: %w", err)
 	}
 
 	// 3. 组合来自内存仓库的静态数据和来自Redis的动态数据
-	var rankedSpells []RankedSpellDTO
-	for i, id := range spellIDs {
+	rankedSpells := make([]RankedSpellDTO, 0, len(spellIDs))
+	for _, id := range spellIDs {
 		index, ok := GetSpellIndexByID(id)
 		if !ok {
-			continue // 如果内存仓库中没有这个ID，跳过
+			return nil, fmt.Errorf("无法从内存仓库中获取ID为 %s 的法术", id)
 		}
 		info, _ := GetSpellInfoByIndex(index)
 
 		var stats SpellStats
-		if statsJSONs[i] != nil {
-			_ = json.Unmarshal([]byte(statsJSONs[i].(string)), &stats)
+		statsJSON, ok := spellStats[id]
+		if !ok {
+			return nil, fmt.Errorf("无法从Redis法术动态数据中获取ID为 %s 的法术", id)
 		}
+		_ = json.Unmarshal([]byte(statsJSON), &stats)
 
 		rankedSpells = append(rankedSpells, RankedSpellDTO{
 			ID:    id,
@@ -105,6 +118,7 @@ func GetRankedSpells() ([]RankedSpellDTO, error) {
 			Stats: stats,
 		})
 	}
+
 	return rankedSpells, nil
 }
 

@@ -7,13 +7,12 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
-	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
 )
 
 // initializeEloTracker 从Redis获取所有法术的ELO分数，并用它们来初始化全局的eloTracker。
 func initializeEloTracker() error {
-	// 1. 从Redis的spell_stats Hash中获取所有法术的统计数据
+	// 1. 从Redis的spell:stats Hash中获取所有法术的统计数据
 	statsMapJSON, err := database.RDB.HGetAll(database.Ctx, spell.StatsKey).Result()
 	if err != nil {
 		return fmt.Errorf("无法从Redis获取法术统计数据: %w", err)
@@ -48,25 +47,14 @@ func PrimeModule() error {
 	}
 	fmt.Println("Vote数据库表迁移成功。")
 
-	// 2. 从自己的表中提取所有唯一的用户ID，并驱动user模块的初始化
-	var userIDs []string
-	err := database.DB.Model(&Vote{}).Where("user_identifier != ?", "").Distinct("user_identifier").Pluck("user_identifier", &userIDs).Error
-	if err != nil {
-		return fmt.Errorf("无法从vote表提取用户ID: %w", err)
-	}
-	if err := user.BatchCreateUsers(userIDs); err != nil {
-		return fmt.Errorf("将用户同步到user模块失败: %w", err)
-	}
-
-	// 3. 初始化内部辅助组件
-	if err := InitializeReplayDefense(); err != nil {
-		return fmt.Errorf("初始化重放检测器失败: %w", err)
-	}
-	if err := RebuildIPVoteCache(); err != nil {
-		return fmt.Errorf("初始化IP统计器失败: %w", err)
-	}
+	// 2. 初始化内部辅助组件
 	if err := initializeEloTracker(); err != nil {
 		return fmt.Errorf("初始化ELO追踪器失败: %w", err)
+	}
+
+	// 3. 准备Redis数据
+	if err := RebuildAndApplyVotes(); err != nil {
+		return fmt.Errorf("初始化时: %w", err)
 	}
 
 	return nil

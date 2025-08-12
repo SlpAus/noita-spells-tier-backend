@@ -20,10 +20,9 @@ func InitRedis() {
 	// Password: 如果您的Redis没有密码，则留空
 	// DB: 使用哪个数据库，0是默认数据库
 	RDB = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     "127.0.0.1:6379",
 		Password: "",
 		DB:       0,
-		Protocol: 2,
 	})
 
 	// 使用Ping命令来测试连接是否成功

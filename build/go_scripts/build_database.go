@@ -25,15 +25,6 @@ type RawSpell struct {
 	Description string `json:"description"`
 }
 
-// CleanSpell 定义了用于生成干净的 spells.json 的数据结构
-type CleanSpell struct {
-	SpellID     string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Sprite      string `json:"sprite"`
-	Type        int    `json:"type"`
-}
-
 // loadTranslations 从 common.csv 加载翻译数据
 func loadTranslations(filePath string) (map[string]string, error) {
 	file, err := os.Open(filePath)
@@ -53,6 +44,9 @@ func loadTranslations(filePath string) (map[string]string, error) {
 		if len(record) >= 10 {
 			key := record[0]
 			value := record[9] // 第10列是中文翻译
+			if value == "" {
+				value = record[1] // 备选第2列的英文文本
+			}
 			translations[key] = value
 		}
 	}
@@ -61,24 +55,23 @@ func loadTranslations(filePath string) (map[string]string, error) {
 }
 
 // preprocessSpells 是核心处理函数
-func preprocessSpells() ([]CleanSpell, []spell.Spell, error) {
+func preprocessSpells() ([]spell.Spell, error) {
 	translations, err := loadTranslations("./assets/data/translations/common.csv")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	rawFile, err := os.ReadFile("./assets/spells_raw.json")
 	if err != nil {
-		return nil, nil, fmt.Errorf("无法读取 spells_raw.json: %w", err)
+		return nil, fmt.Errorf("无法读取 spells_raw.json: %w", err)
 	}
 
 	var rawSpells []RawSpell
 	if err := json.Unmarshal(rawFile, &rawSpells); err != nil {
-		return nil, nil, fmt.Errorf("解析 spells_raw.json 失败: %w", err)
+		return nil, fmt.Errorf("解析 spells_raw.json 失败: %w", err)
 	}
 	fmt.Println("成功读取", len(rawSpells), "条原始法术数据。")
 
-	var cleanSpells []CleanSpell
 	var dbSpells []spell.Spell
 	for _, rawSpell := range rawSpells {
 		nameKey := strings.TrimPrefix(rawSpell.Name, "$")
@@ -95,15 +88,6 @@ func preprocessSpells() ([]CleanSpell, []spell.Spell, error) {
 
 		spriteFileName := filepath.Base(rawSpell.Sprite)
 
-		cleanSpell := CleanSpell{
-			SpellID:     rawSpell.ID,
-			Name:        nameCN,
-			Description: descCN,
-			Sprite:      spriteFileName,
-			Type:        rawSpell.Type,
-		}
-		cleanSpells = append(cleanSpells, cleanSpell)
-
 		dbSpell := spell.Spell{
 			SpellID:     rawSpell.ID,
 			Name:        nameCN,
@@ -118,30 +102,74 @@ func preprocessSpells() ([]CleanSpell, []spell.Spell, error) {
 		dbSpells = append(dbSpells, dbSpell)
 	}
 
-	finalJSON, err := json.MarshalIndent(cleanSpells, "", "  ")
-	if err != nil {
-		return nil, nil, fmt.Errorf("无法序列化最终的spells.json: %w", err)
-	}
-	err = os.WriteFile("./assets/spells.json", finalJSON, 0644)
-	if err != nil {
-		return nil, nil, fmt.Errorf("无法写入 spells.json: %w", err)
-	}
-	fmt.Println("成功生成干净的 spells.json 文件。")
+	return dbSpells, nil
+}
 
-	return cleanSpells, dbSpells, nil
+func dropUserTablesExcept(db *gorm.DB, tablesToKeep []string) error {
+	// 1. 获取数据库中所有表的名称
+	var tableNames []string
+	// 避开SQLite的元数据
+	err := db.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';").Scan(&tableNames).Error
+	if err != nil {
+		return fmt.Errorf("无法获取表列表: %w", err)
+	}
+
+	// 2. 创建一个map以便快速查找需要保留的表
+	keepMap := make(map[string]bool)
+	for _, name := range tablesToKeep {
+		keepMap[name] = true
+	}
+
+	// 3. 遍历所有表，如果不在保留列表中，则使用Migrator删除它
+	for _, tableName := range tableNames {
+		if !keepMap[tableName] {
+			fmt.Printf("正在删除表: %s\n", tableName)
+			if err := db.Migrator().DropTable(tableName); err != nil {
+				return fmt.Errorf("删除表 %s 失败: %w", tableName, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func parseTableName(db *gorm.DB, model interface{}) (string, error) {
+	// 1. 输入校验
+	if model == nil {
+		return "", fmt.Errorf("模型不能为nil")
+	}
+	if db == nil {
+		return "", fmt.Errorf("数据库句柄不能为nil")
+	}
+
+	// 2. 创建一个临时的gorm.Statement
+	// Statement是GORM用于构建SQL的内部对象，包含了schema解析逻辑。
+	stmt := &gorm.Statement{DB: db}
+
+	// 3. 调用stmt.Parse()来解析模型
+	// 这个方法会填充stmt.Schema字段
+	if err := stmt.Parse(model); err != nil {
+		return "", fmt.Errorf("解析模型失败: %w", err)
+	}
+
+	// 4. 从解析后的Schema中安全地获取表名
+	return stmt.Schema.Table, nil
 }
 
 // buildDatabase 使用处理好的法术数据填充数据库
 func buildDatabase() {
 	fmt.Println("开始构建数据库...")
-	_, dbSpells, err := preprocessSpells()
+	dbSpells, err := preprocessSpells()
 	if err != nil {
 		log.Fatalf("预处理数据失败: %v", err)
 	}
 
 	database.InitDB()
+	if err := dropUserTablesExcept(database.DB, []string{}); err != nil {
+		log.Fatalf("删除旧表失败: %v", err)
+	}
+	fmt.Println("所有旧表已删除。")
 	database.DB.AutoMigrate(&spell.Spell{})
-	database.DB.Exec("DELETE FROM spells")
 
 	result := database.DB.Create(&dbSpells)
 	if result.Error != nil {
@@ -153,10 +181,19 @@ func buildDatabase() {
 
 // cleanDatabase 重置所有法术的分数和战绩
 func cleanDatabase() {
-	fmt.Println("开始清理数据库分数...")
+	fmt.Println("开始重置数据库...")
 	database.InitDB()
 
-	// *** 修改部分开始 ***
+	tableName, err := parseTableName(database.DB, &spell.Spell{})
+	if err != nil {
+		log.Fatalf("无法解析保留的数据表名: %v", err)
+	}
+	if err := dropUserTablesExcept(database.DB, []string{tableName}); err != nil {
+		log.Fatalf("删除旧表失败: %v", err)
+	}
+	fmt.Printf("除 %s 外的的旧表已删除。\n", tableName)
+
+	database.DB.AutoMigrate(&spell.Spell{})
 	// GORM 默认开启了安全模式，不允许在没有 WHERE 条件的情况下进行全局更新。
 	// 我们需要通过 .Session(&gorm.Session{AllowGlobalUpdate: true}) 显式地允许全局更新来重置所有记录。
 	result := database.DB.Model(&spell.Spell{}).
@@ -167,7 +204,6 @@ func cleanDatabase() {
 			"win":        0,
 			"rank_score": 0.5,
 		})
-	// *** 修改部分结束 ***
 
 	if result.Error != nil {
 		log.Fatalf("清理数据库失败: %v", result.Error)

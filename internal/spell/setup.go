@@ -35,6 +35,7 @@ func migrateDB() error {
 }
 
 // WarmupCache 从SQLite加载动态数据到Redis，并根据这些数据重建内存中的权重树
+// 注意：此函数不包含锁，调用方需要确保在安全的时机（如单线程启动或重建大范围锁下）调用。
 func WarmupCache() error {
 	var spellsInDB []Spell
 	if err := database.DB.Find(&spellsInDB).Error; err != nil {
@@ -49,7 +50,7 @@ func WarmupCache() error {
 	initialWeights := make([]float64, GetSpellCount())
 
 	for _, spell := range spellsInDB {
-		// 准备动态统计数据 (spell_stats Hash)
+		// 准备动态统计数据 (spell:stats Hash)
 		stats := SpellStats{
 			Score:     spell.Score,
 			Total:     spell.Total,
@@ -59,7 +60,7 @@ func WarmupCache() error {
 		statsJSON, _ := json.Marshal(stats)
 		pipe.HSet(database.Ctx, StatsKey, spell.SpellID, statsJSON)
 
-		// 准备排名数据 (spell_ranking Sorted Set)
+		// 准备排名数据 (spell:ranking Sorted Set)
 		pipe.ZAdd(database.Ctx, RankingKey, redis.Z{
 			Score:  spell.RankScore, // 使用RankScore作为排名依据
 			Member: spell.SpellID,
@@ -78,7 +79,6 @@ func WarmupCache() error {
 	}
 
 	// 在预热Redis后，使用正确的初始权重重建内存中的线段树
-	// (补充：这个操作是线程安全的，因为它在单线程的启动流程中被调用)
 	if err := globalRepository.weightsTree.Rebuild(initialWeights); err != nil {
 		return fmt.Errorf("无法使用初始权重重建线段树: %w", err)
 	}
