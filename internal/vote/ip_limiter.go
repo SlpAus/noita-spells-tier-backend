@@ -91,9 +91,12 @@ func RebuildIPVoteCache() error {
 	defer ipMutex.Unlock()
 
 	// 1. 从SQLite中获取ipVoteWindow内的投票记录
-	var recentVotes []Vote
+	var recentVotes []struct {
+		UserIP   string
+		VoteTime time.Time
+	}
 	beginTime := time.Now().Add(-ipVoteWindow)
-	err := database.DB.Model(&Vote{}).Where("vote_time > ?", beginTime).Select("user_ip", "vote_time").Find(&recentVotes).Error
+	err := database.DB.Model(&Vote{}).Where("vote_time > ?", beginTime).Find(&recentVotes).Error
 	if err != nil {
 		return fmt.Errorf("无法从SQLite读取近期投票: %w", err)
 	}

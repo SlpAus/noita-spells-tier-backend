@@ -1,9 +1,12 @@
 package report
 
 import (
+	"net/http"
 	"time"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
+	"github.com/gin-gonic/gin"
 )
 
 // UserReport 是最终生成并返回给用户的个性化报告。
@@ -77,9 +80,10 @@ type SpellNameRank struct {
 
 // HighlightVote 用于记录一次特殊的投票。
 type HighlightVote struct {
-	SpellA SpellNameRank   `json:"spellA"`
-	SpellB SpellNameRank   `json:"spellB"`
-	Result vote.VoteResult `json:"result"`
+	VoteNumber int             `json:"voteNumber"`
+	SpellA     SpellNameRank   `json:"spellA"`
+	SpellB     SpellNameRank   `json:"spellB"`
+	Result     vote.VoteResult `json:"result"`
 }
 
 // MilestoneVote 记录用户的里程碑时刻。
@@ -88,6 +92,7 @@ type MilestoneVote struct {
 	SpellA     SpellNameRank   `json:"spellA"` // 不使用Rank
 	SpellB     SpellNameRank   `json:"spellB"`
 	Result     vote.VoteResult `json:"result"`
+	Date       time.Time       `json:"date"` // 对齐到天
 }
 
 // ActivityRecord 记录用户的活跃数据。
@@ -99,10 +104,26 @@ type ActivityRecord struct {
 
 // EncounterRecord 记录首次遇到特殊法术的事件。
 type EncounterRecord struct {
-	SpellA   SpellNameRank   `json:"spellA"`
-	SpellB   SpellNameRank   `json:"spellB"`
-	SpecialA bool            `json:"specialA"`
-	SpecialB bool            `json:"specialB"`
-	Result   vote.VoteResult `json:"result"`
-	Date     time.Time       `json:"date"` // 对齐到天
+	VoteNumber int             `json:"voteNumber"`
+	SpellA     SpellNameRank   `json:"spellA"`
+	SpellB     SpellNameRank   `json:"spellB"`
+	SpecialA   bool            `json:"specialA"`
+	SpecialB   bool            `json:"specialB"`
+	Result     vote.VoteResult `json:"result"`
+	Date       time.Time       `json:"date"` // 对齐到天
+}
+
+func GetReport(c *gin.Context) {
+	userID := c.GetString(user.UserIDKey)
+	if !user.IsValidUUID(userID) {
+		userID = ""
+	}
+
+	report, err := GenerateUserReport(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成报告时出错"})
+		return
+	}
+
+	c.JSON(http.StatusOK, report)
 }

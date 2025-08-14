@@ -1,11 +1,9 @@
 package vote
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
@@ -99,7 +97,7 @@ func ApplyIncrementalVotes() error {
 			// c. 批量更新用户统计数据
 			updateStatsByResult(&totalStats, vote.Result)
 			if vote.UserIdentifier != "" {
-				userStats := userStatsAggregator[vote.UserIdentifier] // 获取或得到零值
+				userStats := userStatsAggregator[vote.UserIdentifier]
 				updateStatsByResult(&userStats, vote.Result)
 				userStatsAggregator[vote.UserIdentifier] = userStats
 			}
@@ -212,12 +210,6 @@ func ApplyIncrementalVotes() error {
 		globalVoteProcessor.lastProcessedVoteID = lastProcessedID
 		globalVoteProcessor.processMutex.Unlock()
 		fmt.Printf("增量投票处理完成，Vote Processor将从 ID %d 继续。\n", lastProcessedID)
-	}
-
-	// 7. 触发一次新的快照
-	fmt.Println("增量恢复完成，正在触发一次新的数据快照...")
-	if err := backup.CreateConsistentSnapshotInDB(context.Background()); err != nil {
-		fmt.Printf("警告: 增量恢复后的快照创建失败: %v\n", err)
 	}
 
 	return nil

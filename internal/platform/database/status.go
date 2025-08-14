@@ -31,13 +31,15 @@ func SetInitialRunID(runID string) {
 	globalStatus.lastKnownRunID = runID
 }
 
-// UpdateStatus 用于线程安全地更新健康状态。
-func UpdateStatus(isHealthy bool, newRunID string) {
+// UpdateStatus 用于线程安全地更新健康状态。返回旧的健康状态。
+func UpdateStatus(isHealthy bool, newRunID string) bool {
 	globalStatus.mu.Lock()
 	defer globalStatus.mu.Unlock()
 
+	wasHealthy := globalStatus.isRedisHealthy
+
 	// 只有当状态发生变化时才打印日志
-	if globalStatus.isRedisHealthy != isHealthy {
+	if wasHealthy != isHealthy {
 		globalStatus.isRedisHealthy = isHealthy
 		if isHealthy {
 			fmt.Println("健康检查: Redis服务状态已更新为 [可用]")
@@ -50,6 +52,7 @@ func UpdateStatus(isHealthy bool, newRunID string) {
 	if isHealthy {
 		globalStatus.lastKnownRunID = newRunID
 	}
+	return wasHealthy
 }
 
 // GetLastKnownRunID 用于线程安全地获取已知的run_id。

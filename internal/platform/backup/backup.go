@@ -60,6 +60,7 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 	var lastVoteIDCmd *redis.StringCmd
 	var totalVotesCmd *redis.StringCmd
 	var statsMapCmd *redis.MapStringStringCmd
+	var totalStatsCmd *redis.StringCmd
 	var sortedIDsCmd *redis.StringSliceCmd
 
 	var dirtyUserIDs []string
@@ -80,6 +81,7 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 		lastVoteIDCmd = pipe.Get(database.Ctx, metadata.RedisLastProcessedVoteIDKey)
 		totalVotesCmd = pipe.Get(database.Ctx, metadata.RedisTotalVotesKey)
 		statsMapCmd = pipe.HGetAll(database.Ctx, spell.StatsKey)
+		totalStatsCmd = pipe.HGet(database.Ctx, user.StatsKey, user.TotalStatsKey)
 		sortedIDsCmd = pipe.ZRevRange(database.Ctx, spell.RankingKey, 0, -1)
 		dirtyUserIDsCmd := pipe.SMembers(database.Ctx, user.DirtySetKey)
 		if dirtySetExists > 0 {
@@ -163,12 +165,12 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 		rank := i + 1
 		statsJSON, ok := statsMap[spellID]
 		if !ok {
-			return fmt.Errorf("备份警告: 在stats哈希表中找不到ID为 %s 的法术.\n", spellID)
+			return fmt.Errorf("在stats哈希表中找不到ID为 %s 的法术.\n", spellID)
 		}
 
 		var stats spell.SpellStats
 		if err := json.Unmarshal([]byte(statsJSON), &stats); err != nil {
-			return fmt.Errorf("备份警告: 解析法术 %s 的数据失败: %w\n", spellID, err)
+			return fmt.Errorf("解析法术 %s 的数据失败: %w\n", spellID, err)
 		}
 
 		spellToUpdate := spell.Spell{
@@ -189,7 +191,7 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 
 		var userStats user.UserStats
 		if err := json.Unmarshal([]byte(userStatsJSON), &userStats); err != nil {
-			return fmt.Errorf("警告：解析用户 %s 的统计数据JSON失败: %w\n", userID, err)
+			return fmt.Errorf("解析用户 %s 的统计数据JSON失败: %w\n", userID, err)
 		}
 
 		userToUpsert := user.User{
@@ -199,6 +201,20 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 			SkipCount: userStats.Skip,
 		}
 		usersToUpsert = append(usersToUpsert, userToUpsert)
+	}
+
+	totalStatsJSON, err := totalStatsCmd.Result()
+	if err != nil {
+		return fmt.Errorf("获取 totalStatsJSON 的结果时失败: %w", err)
+	}
+	var totalStats user.UserStats
+	if err := json.Unmarshal([]byte(totalStatsJSON), &totalStats); err != nil {
+		return fmt.Errorf("解析总统计数据JSON失败: %w\n", err)
+	}
+	totalStatsToUpsert := user.TotalStats{
+		WinsCount: totalStats.Wins,
+		DrawCount: totalStats.Draw,
+		SkipCount: totalStats.Skip,
 	}
 
 	select {
@@ -236,7 +252,18 @@ func CreateConsistentSnapshotInDB(ctx context.Context) (err error) {
 				return fmt.Errorf("持久化用户数据失败: %w", err)
 			}
 
-			// c. 更新metadata模块的元数据
+			// c. 持久化总统计数据
+			// 使用固定的ID=1来执行Upsert
+			totalStatsToUpsert.ID = 1
+			err = tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"wins_count", "draw_count", "skip_count", "updated_at"}),
+			}).Create(&totalStatsToUpsert).Error
+			if err != nil {
+				return fmt.Errorf("持久化总统计数据失败: %w", err)
+			}
+
+			// d. 更新metadata模块的元数据
 			if err := metadata.SetLastSnapshotVoteID(tx, lastVoteID); err != nil {
 				return fmt.Errorf("更新元数据 LastSnapshotVoteID 失败: %w", err)
 			}

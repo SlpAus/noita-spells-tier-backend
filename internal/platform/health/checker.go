@@ -85,14 +85,20 @@ func PerformCheck() {
 		rebuildSuccess := triggerAtomicRebuild(currentRunID)
 		if rebuildSuccess {
 			// 只有重建成功，才更新状态为可用，并更新已知的run_id
-			database.UpdateStatus(true, currentRunID)
+			wasHealthy := database.UpdateStatus(true, currentRunID)
+			if !wasHealthy {
+				startup.HandleRedisRecovery()
+			}
 		} else {
 			// 重建失败，保持不可用状态
 			database.UpdateStatus(false, "")
 		}
 	} else {
 		// run_id未变，说明服务健康
-		database.UpdateStatus(true, currentRunID)
+		wasHealthy := database.UpdateStatus(true, currentRunID)
+		if !wasHealthy {
+			startup.HandleRedisRecovery()
+		}
 	}
 }
 

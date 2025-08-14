@@ -1,9 +1,12 @@
 package startup
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/report"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
@@ -61,6 +64,19 @@ func RebuildCache() error {
 		return err
 	}
 
-	fmt.Println("缓存热重建完成！")
+	// 触发一次新的快照
+	fmt.Println("缓存热重建完成，正在触发一次新的数据快照...")
+	if err := backup.CreateConsistentSnapshotInDB(context.Background()); err != nil {
+		fmt.Printf("警告: 缓存热重建后的快照创建失败: %v\n", err)
+	}
+	fmt.Println("快照创建成功！")
+
 	return nil
+}
+
+// HandleRedisRecovery 在Redis从不健康状态恢复时，执行必要的清理和恢复操作。
+func HandleRedisRecovery() {
+	fmt.Println("检测到Redis已恢复，正在执行恢复后操作...")
+	report.ClearMirrorRepo()
+	fmt.Println("恢复后操作完成。")
 }

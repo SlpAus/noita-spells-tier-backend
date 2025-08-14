@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"

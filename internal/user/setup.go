@@ -6,6 +6,7 @@ import (
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 // PrimeCachedDB 是user模块在应用启动时调用的主设置函数。
@@ -26,10 +27,10 @@ func PrimeCachedDB() (err error) {
 
 // migrateDB 负责自动迁移数据库表结构
 func migrateDB() error {
-	if err := database.DB.AutoMigrate(&User{}); err != nil {
-		return fmt.Errorf("无法迁移user表: %w", err)
+	if err := database.DB.AutoMigrate(&User{}, &TotalStats{}); err != nil {
+		return fmt.Errorf("无法迁移user或total_stats表: %w", err)
 	}
-	fmt.Println("User数据库表迁移成功。")
+	fmt.Println("User和TotalStats数据库表迁移成功。")
 	return nil
 }
 
@@ -49,8 +50,16 @@ func WarmupCache() error {
 	}
 	fmt.Println("旧的user缓存已清空.")
 
-	// 2. 初始化社区总票数累加器
-	totalStats := UserStats{}
+	// 2. 从SQLite加载社区总统计数据
+	var totalStatsRecord TotalStats
+	if err := database.DB.First(&totalStatsRecord).Error; err != nil && err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("从SQLite加载总统计数据失败: %w", err)
+	}
+	totalStats := UserStats{
+		Wins: totalStatsRecord.WinsCount,
+		Draw: totalStatsRecord.DrawCount,
+		Skip: totalStatsRecord.SkipCount,
+	}
 
 	// 3. 分批从SQLite读取数据并写入Redis
 	const batchSize = 10000
@@ -92,11 +101,6 @@ func WarmupCache() error {
 				Score:  totalVotes,
 				Member: user.UUID,
 			})
-
-			// 累加到社区总票数
-			totalStats.Wins += user.WinsCount
-			totalStats.Draw += user.DrawCount
-			totalStats.Skip += user.SkipCount
 		}
 
 		// 使用Pipeline写入当前批次的数据

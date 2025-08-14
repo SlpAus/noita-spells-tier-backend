@@ -18,19 +18,23 @@ var DB *gorm.DB
 func InitDB() {
 	var err error
 
+	// 包含性能优化的DSN字符串
+	dsn := "file:ranking.db?journal_mode=WAL&cache=shared&cache_size=-262144"
+
 	// GORM日志配置
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
 			SlowThreshold: 0,
-			LogLevel:      logger.Silent, // 在生产环境中可以设为Silent
+			LogLevel:      logger.Silent,
 			Colorful:      true,
 		},
 	)
 
 	// 连接到SQLite数据库
-	DB, err = gorm.Open(sqlite.Open("ranking.db"), &gorm.Config{
-		Logger: newLogger,
+	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger:      newLogger,
+		PrepareStmt: true,
 	})
 
 	if err != nil {

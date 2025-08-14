@@ -26,3 +26,12 @@ type User struct {
 	UpdatedAt time.Time
 	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
+
+// TotalStats 定义了在SQLite中持久化的社区总体统计数据。
+// 这张表中应该只有一条记录。
+type TotalStats struct {
+	gorm.Model
+	WinsCount int
+	DrawCount int
+	SkipCount int
+}

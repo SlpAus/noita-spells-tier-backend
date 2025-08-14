@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -83,4 +84,19 @@ func GetSnapshotTotalVotes(db *gorm.DB) (float64, error) {
 func SetSnapshotTotalVotes(db *gorm.DB, count float64) error {
 	valueStr := strconv.FormatFloat(count, 'f', -1, 64)
 	return SetValue(db, SnapshotTotalVotesKey, valueStr)
+}
+
+// GetLastSnapshotTime is a helper that retrieves the timestamp of the last snapshot.
+func GetLastSnapshotTime(db *gorm.DB) (time.Time, error) {
+	var meta Metadata
+	err := db.Where("key = ?", LastSnapshotVoteIDKey).First(&meta).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// If the key doesn't exist, it means no snapshot has been created yet.
+			// Returning the current time is a safe fallback.
+			return time.Now(), nil
+		}
+		return time.Time{}, err
+	}
+	return meta.UpdatedAt, nil
 }

@@ -41,13 +41,6 @@ func main() {
 	// --- 4. 启动所有后台工作进程 ---
 	// 为每个需要优雅停机的后台服务注册，并获取其生命周期句柄
 
-	// TODO: 不再使用user.StartActivationWorker
-	// userHandle, err := gracefulManager.NewServiceHandle("UserActivationWorker")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// go user.StartActivationWorker(userHandle)
-
 	backupHandle, err := gracefulManager.NewServiceHandle("BackupScheduler")
 	if err != nil {
 		panic(err)
