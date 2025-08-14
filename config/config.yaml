@@ -1,0 +1,24 @@
+# 服务器相关配置
+server:
+  # Gin框架运行模式: debug / release / test
+  mode: "release"
+  # HTTP服务监听地址和端口
+  address: ":8080"
+  # 跨域配置
+  cors:
+    # 允许的前端域名列表
+    allowedOrigins:
+      - "http://localhost:3000"
+      - "http://127.0.0.1:3000"
+
+# 数据库和缓存配置
+database:
+  # Redis 连接配置
+  redis:
+    address: "localhost:6379"
+    password: ""
+    db: 0
+  # SQLite 内存缓存配置
+  sqlite:
+    # 缓存最大值 (单位: KB)
+    maxCacheSizeKB: 262144

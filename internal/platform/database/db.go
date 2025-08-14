@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/mattn/go-sqlite3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -15,11 +16,12 @@ import (
 var DB *gorm.DB
 
 // InitDB 初始化数据库连接
-func InitDB() {
+func InitDB(cfg config.SqliteConfig) {
 	var err error
 
-	// 包含性能优化的DSN字符串
-	dsn := "file:ranking.db?journal_mode=WAL&cache=shared&cache_size=-262144"
+	// 根据配置动态构建包含性能优化的DSN字符串
+	// cache_size单位是KiB，负值表示使用KiB。
+	dsn := fmt.Sprintf("file:ranking.db?journal_mode=WAL&cache=shared&cache_size=-%d", cfg.MaxCacheSizeKB)
 
 	// GORM日志配置
 	newLogger := logger.New(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -14,15 +15,13 @@ var RDB *redis.Client
 var Ctx = context.Background()
 
 // InitRedis 初始化与Redis数据库的连接
-func InitRedis() {
+func InitRedis(cfg config.RedisConfig) {
 	// 创建一个新的Redis客户端
-	// Addr: Redis服务器的地址和端口
-	// Password: 如果您的Redis没有密码，则留空
-	// DB: 使用哪个数据库，0是默认数据库
+	// 使用从配置文件加载的参数
 	RDB = redis.NewClient(&redis.Options{
-		Addr:     "127.0.0.1:6379",
-		Password: "",
-		DB:       0,
+		Addr:     cfg.Address,
+		Password: cfg.Password,
+		DB:       cfg.DB,
 	})
 
 	// 使用Ping命令来测试连接是否成功

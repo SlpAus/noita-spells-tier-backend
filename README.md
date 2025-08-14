@@ -58,3 +58,14 @@ docker run -d --name my-redis-instance -p 127.0.0.1:6379:6379 my-redis:1.0
 ```bash
 go run ./cmd/server/main.go
 ```
+
+---
+
+### 配置
+
+应用的核心配置位于 `config/config.yaml` 文件中。
+
+*   **`server`**: Gin服务器设置，包括运行模式 (`debug`/`release`)、监听地址和CORS跨域设置。
+*   **`database`**: Redis连接信息和SQLite的缓存大小。
+
+在部署或修改环境时，请相应地更新此文件。

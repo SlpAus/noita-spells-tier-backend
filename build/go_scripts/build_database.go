@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 
@@ -164,7 +165,10 @@ func buildDatabase() {
 		log.Fatalf("预处理数据失败: %v", err)
 	}
 
-	database.InitDB()
+	// 为构建脚本提供一个默认的数据库配置
+	dbCfg := config.SqliteConfig{MaxCacheSizeKB: 10240}
+	database.InitDB(dbCfg)
+
 	if err := dropUserTablesExcept(database.DB, []string{}); err != nil {
 		log.Fatalf("删除旧表失败: %v", err)
 	}
@@ -182,7 +186,9 @@ func buildDatabase() {
 // cleanDatabase 重置所有法术的分数和战绩
 func cleanDatabase() {
 	fmt.Println("开始重置数据库...")
-	database.InitDB()
+	// 为清理脚本提供一个默认的数据库配置
+	dbCfg := config.SqliteConfig{MaxCacheSizeKB: 10240}
+	database.InitDB(dbCfg)
 
 	tableName, err := parseTableName(database.DB, &spell.Spell{})
 	if err != nil {

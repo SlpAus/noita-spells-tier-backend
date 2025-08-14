@@ -7,6 +7,7 @@ import (
 
 	"github.com/SlpAus/noita-spells-tier-backend/api"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/health"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/shutdown"
@@ -19,13 +20,19 @@ import (
 )
 
 func main() {
-	// --- 1. 初始设置 ---
+	// --- 1. 加载配置 ---
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		panic(fmt.Sprintf("加载配置失败: %v", err))
+	}
+
+	// --- 2. 初始设置 ---
 	token.GenerateSecretKey()
-	database.InitDB()
-	database.InitRedis()
+	database.InitDB(cfg.Database.Sqlite)
+	database.InitRedis(cfg.Database.Redis)
 	health.InitializeRunID()
 
-	// --- 2. 数据库和缓存初始化 ---
+	// --- 3. 数据库和缓存初始化 ---
 	if err := startup.InitializeApplication(); err != nil {
 		panic(fmt.Sprintf("应用初始化失败，无法启动: %v", err))
 	}
@@ -65,28 +72,30 @@ func main() {
 	}
 	go health.StartRedisHealthCheck(healthHandle)
 
-	// --- 5. 创建并配置Web服务器 ---
+	// --- 6. 创建并配置Web服务器 ---
+	gin.SetMode(cfg.Server.Mode)
 	r := gin.Default()
+
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     cfg.Server.Cors.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
 	r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
-	r.Static("/images/borders", "./assets/spell_borders")
 	api.SetupRoutes(r)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.Server.Address,
 		Handler: r,
 	}
 
-	// --- 6. 启动Web服务器并等待停机信号 ---
+	// --- 7. 启动Web服务器并等待停机信号 ---
 	go func() {
-		fmt.Println("服务器已准备就绪，开始监听 :8080")
+		fmt.Printf("服务器已准备就绪，开始监听 %s\n", cfg.Server.Address)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			panic("无法启动Gin服务器: " + err.Error())
 		}
