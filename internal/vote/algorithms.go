@@ -6,9 +6,11 @@ import "math"
 
 const (
 	// calculateMultiplierForCount 使用的常量
-	voteMultiplierBase  = 2
-	voteMultiplierDecay = 0.01
-	minVoteMultiplier   = 0.01
+	GracePeriodThreshold       = 200
+	HarshPenaltyThreshold      = 600
+	MultiplierAtHarshThreshold = 0.5
+	CutoffMultiplier           = 0.01
+	DecaySlope                 = (MultiplierAtHarshThreshold - 1.0) / (HarshPenaltyThreshold - GracePeriodThreshold)
 
 	// eloKFactor 是ELO算法中的K值，它决定了每次对战后分数变化的大小。
 	eloKFactor = 32
@@ -23,8 +25,15 @@ const (
 
 // calculateMultiplierForCount 根据同IP一定时间内的投票数计算该票的Multiplier
 func calculateMultiplierForCount(count int64) float64 {
-	multiplier := voteMultiplierBase - voteMultiplierDecay*float64(count)
-	return max(minVoteMultiplier, min(1.0, multiplier))
+	if count <= GracePeriodThreshold {
+		return 1.0
+	}
+
+	if count <= HarshPenaltyThreshold {
+		return 1.0 + DecaySlope*float64(count-GracePeriodThreshold)
+	}
+
+	return CutoffMultiplier
 }
 
 // --- ELO计算 ---

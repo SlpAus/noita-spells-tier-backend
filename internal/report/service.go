@@ -90,11 +90,12 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 	totalVotersCmd := pipe.ZCard(database.Ctx, user.RankingKey)
 	spellRankingCmd := pipe.ZRevRangeWithScores(database.Ctx, spell.RankingKey, 0, -1)
 	_, err = pipe.Exec(database.Ctx)
-	if err != nil {
+	// 这里可能返回 redis.Nil
+	if err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("从Redis获取用户统计数据时出错: %w", err)
 	}
 
-	// b.1. 解析通用字段
+	// b. 解析通用字段
 	lastVoteID, err := lastVoteIDCmd.Uint64()
 	if err != nil {
 		return nil, fmt.Errorf("获取 lastVoteID 的结果时出错: %w", err)
@@ -139,22 +140,6 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 		rankToSpell[i] = spellID
 	}
 
-	// b.2. 提前解析可选字段
-
-	// 决断率相关
-	var totalStats user.UserStats
-	if report.TotalVotes >= MinVotesForDecisionRate {
-		totalStatsJSON, err := totalStatsCmd.Result()
-		// user.TotalStatsKey 对应的值默认存在
-		if err != nil {
-			return nil, fmt.Errorf("获取 totalStatsJSON 的值时出错: %w", err)
-		}
-		err = json.Unmarshal([]byte(totalStatsJSON), &totalStats)
-		if err != nil {
-			return nil, fmt.Errorf("解析 totalStatsJSON 时出错: %w", err)
-		}
-	}
-
 	// c. 获取用户投票历史
 	var userVotes []userVoteRecord
 	if err := database.DB.Model(&vote.Vote{}).
@@ -182,6 +167,18 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 
 	// 决断率
 	if report.TotalVotes >= MinVotesForDecisionRate {
+		totalStatsJSON, err := totalStatsCmd.Result()
+		// user.TotalStatsKey 对应的值默认存在
+		if err != nil {
+			return nil, fmt.Errorf("获取 totalStatsJSON 的值时出错: %w", err)
+		}
+
+		var totalStats user.UserStats
+		err = json.Unmarshal([]byte(totalStatsJSON), &totalStats)
+		if err != nil {
+			return nil, fmt.Errorf("解析 totalStatsJSON 时出错: %w", err)
+		}
+
 		decisionRate := calculateDecisionRate(userStats)
 		report.DecisionRate = &decisionRate
 

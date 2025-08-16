@@ -100,7 +100,7 @@ func (et *eloTracker) Update(tx *eloTrackerTx, oldScore, newScore float64) bool 
 
 	// 如果边界已发生变化，我们立刻返回，让外部逻辑触发重建
 	if boundaryChanged {
-		fmt.Printf("ELO边界发生变化: count(%.2f) -> 0。需要重建。\n", oldScore)
+		// fmt.Printf("ELO边界发生变化: count(%.2f) -> 0。需要重建。\n", oldScore)
 		return true
 	}
 
@@ -117,9 +117,9 @@ func (et *eloTracker) Update(tx *eloTrackerTx, oldScore, newScore float64) bool 
 		et.data.maxCount++
 	}
 
-	if boundaryChanged {
-		fmt.Printf("ELO边界发生变化: old(%.2f) -> new(%.2f)。需要重建。\n", oldScore, newScore)
-	}
+	// if boundaryChanged {
+	// 	fmt.Printf("ELO边界发生变化: old(%.2f) -> new(%.2f)。需要重建。\n", oldScore, newScore)
+	// }
 
 	return boundaryChanged
 }

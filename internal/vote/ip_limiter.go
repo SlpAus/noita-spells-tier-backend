@@ -27,9 +27,9 @@ const (
 	// ipVoteKeyPrefix 是Redis中有序集合的键名前缀
 	ipVoteKeyPrefix = "ip_votes:"
 	// ipVoteWindow 定义了IP投票计数的时间窗口
-	ipVoteWindow = 24 * time.Hour
+	ipVoteWindow = 60 * time.Minute
 	// ipVoteTTL 是每个IP记录在Redis中的生存时间，比窗口稍长以作缓冲
-	ipVoteTTL = 25 * time.Hour
+	ipVoteTTL = 65 * time.Minute
 )
 
 var (

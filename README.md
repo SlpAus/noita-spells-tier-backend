@@ -65,7 +65,7 @@ go run ./cmd/server/main.go
 
 应用的核心配置位于 `config/config.yaml` 文件中。
 
-*   **`server`**: Gin服务器设置，包括运行模式 (`debug`/`release`)、监听地址和CORS跨域设置。
+*   **`server`**: Gin服务器设置，包括运行模式 (`debug`/`release`)、监听地址和CORS跨域设置。`release`模式下不会配置CORS，且Go部分不再路由`/images/spells`，它们的职责转交Nginx。
 *   **`database`**: Redis连接信息和SQLite的缓存大小。
 
 在部署或修改环境时，请相应地更新此文件。

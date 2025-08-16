@@ -76,16 +76,19 @@ func main() {
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.Default()
 
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     cfg.Server.Cors.AllowedOrigins,
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	if cfg.Server.Mode != "release" {
+		r.Use(cors.New(cors.Config{
+			AllowOrigins:     cfg.Server.Cors.AllowedOrigins,
+			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+			AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+			ExposeHeaders:    []string{"Content-Length"},
+			AllowCredentials: true,
+			MaxAge:           12 * time.Hour,
+		}))
 
-	r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
+		r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
+	}
+
 	api.SetupRoutes(r)
 
 	server := &http.Server{

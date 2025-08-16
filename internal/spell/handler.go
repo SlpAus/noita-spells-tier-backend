@@ -78,7 +78,7 @@ func formatForPair(dto PairSpellDTO, c *gin.Context) SpellPairResponse {
 func GetRanking(c *gin.Context) {
 	rankedSpells, err := GetRankedSpells()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取排行榜数据失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取排行榜数据失败"})
 		return
 	}
 
@@ -94,7 +94,7 @@ func GetSpellByID(c *gin.Context) {
 	spellID := c.Param("id")
 	spellDTO, err := GetSpellImageInfoByID(spellID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库查询失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "数据库查询失败"})
 		return
 	}
 	if spellDTO == nil {
@@ -129,7 +129,7 @@ func GetSpellPair(c *gin.Context) {
 		} else if err.Error() == "数据库中法术数量不足" || err.Error() == "排除后剩余法术数量不足" {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "获取法术对失败: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "获取法术对时发生内部错误"})
 		}
 		return
 	}

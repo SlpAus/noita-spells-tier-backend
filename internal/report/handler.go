@@ -1,6 +1,7 @@
 package report
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -121,7 +122,8 @@ func GetReport(c *gin.Context) {
 
 	report, err := GenerateUserReport(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成报告时出错"})
+		fmt.Printf("%v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成报告时时发生内部错误"})
 		return
 	}
 
