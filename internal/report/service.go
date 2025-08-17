@@ -85,7 +85,7 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 	pipe := database.RDB.TxPipeline()
 	lastVoteIDCmd := pipe.Get(database.Ctx, metadata.RedisLastProcessedVoteIDKey)
 	userStatsCmd := pipe.HGet(database.Ctx, user.StatsKey, userID)
-	userRankCmd := pipe.ZRank(database.Ctx, user.RankingKey, userID)
+	userRankCmd := pipe.ZRevRank(database.Ctx, user.RankingKey, userID)
 	totalStatsCmd := pipe.HGet(database.Ctx, user.StatsKey, user.TotalStatsKey)
 	totalVotersCmd := pipe.ZCard(database.Ctx, user.RankingKey)
 	spellRankingCmd := pipe.ZRevRangeWithScores(database.Ctx, spell.RankingKey, 0, -1)
@@ -158,8 +158,10 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 	}
 
 	if totalVoters > 0 {
+		fmt.Printf("%v %v %v", userID, userRank, totalVoters)
 		report.VoteRankPercent = float64(userRank) / float64(totalVoters)
 	} else {
+		fmt.Printf("%v %v %v", userID, userRank, totalVoters)
 		report.VoteRankPercent = 1.0
 	}
 
