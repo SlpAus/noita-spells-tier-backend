@@ -4,6 +4,8 @@
 
 **后端技术栈**: Go, Gin, Redis, SQLite
 
+**前端项目**: [SlpAus/noita-spells-tier-frontend](https://github.com/SlpAus/noita-spells-tier-frontend)
+
 ## 快速开始
 
 ### 依赖环境
