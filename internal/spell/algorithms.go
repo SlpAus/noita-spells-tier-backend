@@ -4,14 +4,41 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 )
 
 // --- 算法常量 ---
 const (
-	gaussianP         = 0.2  // 高斯权重分布中的最低权重惩罚 (P)
-	mixtureFactorBase = -0.1 // f(M) = base + rate * M/N
-	mixtureFactorRate = 0.01
+	gaussianPForSpellMode         = 0.2
+	mixtureFactorBaseForSpellMode = -0.1
+	mixtureFactorRateForSpellMode = 0.01
 )
+
+const (
+	gaussianPForPerkMode         = 0.2
+	mixtureFactorBaseForPerkMode = -0.1
+	mixtureFactorRateForPerkMode = 0.0025
+)
+
+var (
+	gaussianP         float64 // 高斯权重分布中的最低权重惩罚 (P)
+	mixtureFactorBase float64 // f(M) = base + rate * M/N
+	mixtureFactorRate float64
+)
+
+func loadAlgorithmConsts(mode config.AppMode) {
+	switch mode {
+	case config.AppModeSpell:
+		gaussianP = gaussianPForSpellMode
+		mixtureFactorBase = mixtureFactorBaseForSpellMode
+		mixtureFactorRate = mixtureFactorRateForSpellMode
+	case config.AppModePerk:
+		gaussianP = gaussianPForPerkMode
+		mixtureFactorBase = mixtureFactorBaseForPerkMode
+		mixtureFactorRate = mixtureFactorRateForPerkMode
+	}
+}
 
 // --- 权重函数 ---
 

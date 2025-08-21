@@ -18,6 +18,7 @@ import (
 )
 
 // RawSpell 对应 spells_raw.json 中的原始数据结构
+// perks_raw.json 也复用这个结构
 type RawSpell struct {
 	Sprite      string `json:"sprite"`
 	Name        string `json:"name"`
@@ -56,22 +57,35 @@ func loadTranslations(filePath string) (map[string]string, error) {
 }
 
 // preprocessSpells 是核心处理函数
-func preprocessSpells() ([]spell.Spell, error) {
+func preprocessSpells(appCfg config.AppConfig) ([]spell.Spell, error) {
 	translations, err := loadTranslations("./assets/data/translations/common.csv")
 	if err != nil {
 		return nil, err
 	}
 
-	rawFile, err := os.ReadFile("./assets/spells_raw.json")
+	var fileName string
+	switch appCfg.Mode {
+	case config.AppModeSpell:
+		fileName = "spells_raw.json"
+	case config.AppModePerk:
+		fileName = "perks_raw.json"
+	}
+	filePath := fmt.Sprintf("./assets/%s", fileName)
+	rawFile, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("无法读取 spells_raw.json: %w", err)
+		return nil, fmt.Errorf("无法读取 %s: %w", fileName, err)
 	}
 
 	var rawSpells []RawSpell
 	if err := json.Unmarshal(rawFile, &rawSpells); err != nil {
-		return nil, fmt.Errorf("解析 spells_raw.json 失败: %w", err)
+		return nil, fmt.Errorf("解析 %s 失败: %w", fileName, err)
 	}
-	fmt.Println("成功读取", len(rawSpells), "条原始法术数据。")
+	switch appCfg.Mode {
+	case config.AppModeSpell:
+		fmt.Println("成功读取", len(rawSpells), "条原始法术数据。")
+	case config.AppModePerk:
+		fmt.Println("成功读取", len(rawSpells), "条原始天赋数据。")
+	}
 
 	var dbSpells []spell.Spell
 	for _, rawSpell := range rawSpells {
@@ -157,16 +171,14 @@ func parseTableName(db *gorm.DB, model interface{}) (string, error) {
 	return stmt.Schema.Table, nil
 }
 
-// buildDatabase 使用处理好的法术数据填充数据库
-func buildDatabase() {
+// buildDatabase 使用处理好的法术/天赋数据填充数据库
+func buildDatabase(appCfg config.AppConfig, dbCfg config.SqliteConfig) {
 	fmt.Println("开始构建数据库...")
-	dbSpells, err := preprocessSpells()
+	dbSpells, err := preprocessSpells(appCfg)
 	if err != nil {
 		log.Fatalf("预处理数据失败: %v", err)
 	}
 
-	// 为构建脚本提供一个默认的数据库配置
-	dbCfg := config.SqliteConfig{MaxCacheSizeKB: 10240}
 	database.InitDB(dbCfg)
 
 	if err := dropUserTablesExcept(database.DB, []string{}); err != nil {
@@ -180,14 +192,17 @@ func buildDatabase() {
 		log.Fatalf("向数据库插入数据失败: %v", result.Error)
 	}
 
-	fmt.Printf("数据库构建完成！成功插入 %d 条法术数据。\n", result.RowsAffected)
+	switch appCfg.Mode {
+	case config.AppModeSpell:
+		fmt.Printf("数据库构建完成！成功插入 %d 条法术数据。\n", result.RowsAffected)
+	case config.AppModePerk:
+		fmt.Printf("数据库构建完成！成功插入 %d 条天赋数据。\n", result.RowsAffected)
+	}
 }
 
-// cleanDatabase 重置所有法术的分数和战绩
-func cleanDatabase() {
+// cleanDatabase 重置所有法术/天赋的分数和战绩
+func cleanDatabase(dbCfg config.SqliteConfig) {
 	fmt.Println("开始重置数据库...")
-	// 为清理脚本提供一个默认的数据库配置
-	dbCfg := config.SqliteConfig{MaxCacheSizeKB: 10240}
 	database.InitDB(dbCfg)
 
 	tableName, err := parseTableName(database.DB, &spell.Spell{})
@@ -221,11 +236,16 @@ func main() {
 	task := flag.String("task", "build", "要执行的任务: 'build' (构建并填充数据库) 或 'clean' (重置分数)")
 	flag.Parse()
 
+	config, err := config.LoadConfig()
+	if err != nil {
+		panic(fmt.Sprintf("加载配置失败: %v", err))
+	}
+
 	switch *task {
 	case "build":
-		buildDatabase()
+		buildDatabase(config.App, config.Database.Sqlite)
 	case "clean":
-		cleanDatabase()
+		cleanDatabase(config.Database.Sqlite)
 	default:
 		fmt.Println("未知的任务:", *task)
 		fmt.Println("可用任务: 'build', 'clean'")

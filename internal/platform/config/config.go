@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -13,20 +15,41 @@ var Cfg *Config
 // 它与 config.yaml 文件的结构完全对应
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
+	App      AppConfig      `mapstructure:"app"`
 	Database DatabaseConfig `mapstructure:"database"`
 }
 
 // ServerConfig 定义了服务器相关的配置
 type ServerConfig struct {
-	Mode    string     `mapstructure:"mode"`
+	Mode    ServerMode `mapstructure:"mode"`
 	Address string     `mapstructure:"address"`
 	Cors    CorsConfig `mapstructure:"cors"`
 }
+
+type ServerMode string
+
+const (
+	ServerModeDebug   ServerMode = "debug"
+	ServerModeRelease ServerMode = "release"
+	ServerModeTest    ServerMode = "test"
+)
 
 // CorsConfig 定义了CORS相关的配置
 type CorsConfig struct {
 	AllowedOrigins []string `mapstructure:"allowedOrigins"`
 }
+
+// AppConfig 定义了应用模式相关的配置
+type AppConfig struct {
+	Mode AppMode `mapstructure:"mode"`
+}
+
+type AppMode string
+
+const (
+	AppModeSpell AppMode = "spell"
+	AppModePerk  AppMode = "perk"
+)
 
 // DatabaseConfig 定义了数据库和缓存相关的配置
 type DatabaseConfig struct {
@@ -43,7 +66,24 @@ type RedisConfig struct {
 
 // SqliteConfig 定义了内存缓存的配置
 type SqliteConfig struct {
-	MaxCacheSizeKB int64 `mapstructure:"maxCacheSizeKB"`
+	FileName       string `mapstructure:"fileName"`
+	MaxCacheSizeKB int64  `mapstructure:"maxCacheSizeKB"`
+}
+
+func (cfg *Config) validate() error {
+	switch cfg.Server.Mode {
+	case ServerModeDebug, ServerModeRelease, ServerModeTest:
+	default:
+		return fmt.Errorf("cfg.Server.Mode 不能为 %s", cfg.Server.Mode)
+	}
+
+	switch cfg.App.Mode {
+	case AppModeSpell, AppModePerk:
+	default:
+		return fmt.Errorf("cfg.App.Mode 不能为 %s", cfg.App.Mode)
+	}
+
+	return nil
 }
 
 // LoadConfig 函数负责查找、加载和解析配置文件
@@ -51,8 +91,13 @@ type SqliteConfig struct {
 func LoadConfig() (*Config, error) {
 	v := viper.New()
 
+	configName := os.Getenv("CONFIG_NAME")
+	if configName == "" {
+		configName = "config"
+	}
+
 	// 1. 设置配置文件名和类型
-	v.SetConfigName("config") // 文件名 (不带扩展名)
+	v.SetConfigName(configName) // 文件名 (不带扩展名)
 	v.SetConfigType("yaml")   // 文件类型
 
 	// 2. 添加配置文件搜索路径
@@ -73,6 +118,10 @@ func LoadConfig() (*Config, error) {
 	// 5. 将配置反序列化到结构体中
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 

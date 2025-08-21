@@ -4,9 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/redis/go-redis/v9"
 )
+
+func ConfigureModule(mode config.AppMode) {
+	loadAlgorithmConsts(mode)
+	initHandlerMode(mode)
+}
 
 // PrimeCachedDB 负责初始化spell模块的数据库和内存仓库
 func PrimeCachedDB() error {

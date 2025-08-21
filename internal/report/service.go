@@ -25,12 +25,12 @@ type userVoteRecord struct {
 	VoteTime  time.Time
 }
 
-// GenerateUserReport 是生成用户报告的统一入口。
+// GenerateSpellUserReport 是生成用户报告的统一入口。
 // 它会检查Redis的健康状况，并相应地选择从Redis实时数据或从内存快照生成报告。
-func GenerateUserReport(userID string) (*UserReport, error) {
+func GenerateUserReport(userID string) (*SpellUserReport, error) {
 	// 用户无效，快速返回
 	if userID == "" {
-		return &UserReport{
+		return &SpellUserReport{
 			GeneratedAt:     time.Now(),
 			VoteRankPercent: 1.0,
 		}, nil
@@ -53,7 +53,7 @@ func getSpellNameByID(id string) (string, error) {
 }
 
 // generateReportFromRedis 包含从Redis生成报告的完整逻辑，包括缓存。
-func generateReportFromRedis(userID string) (report *UserReport, err error) {
+func generateReportFromRedis(userID string) (report *SpellUserReport, err error) {
 	// 1. 尝试从缓存获取
 	cachedReport, err := GetReportCache(userID)
 	if err == nil && cachedReport != nil {
@@ -61,7 +61,7 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 	}
 
 	// 2. 缓存未命中，生成新报告
-	report = &UserReport{
+	report = &SpellUserReport{
 		UserID:      userID,
 		GeneratedAt: time.Now(),
 	}
@@ -269,14 +269,14 @@ func generateReportFromRedis(userID string) (report *UserReport, err error) {
 }
 
 // generateReportFromMirrorRepo 从内存镜像生成报告（Redis降级时使用）。
-func generateReportFromMirrorRepo(userID string) (*UserReport, error) {
+func generateReportFromMirrorRepo(userID string) (*SpellUserReport, error) {
 	unlock, err := mirrorRepo.ensureAndLock()
 	if err != nil {
 		return nil, fmt.Errorf("无法确保或锁定内存仓库: %w", err)
 	}
 	defer unlock()
 
-	report := &UserReport{
+	report := &SpellUserReport{
 		UserID:      userID,
 		GeneratedAt: mirrorRepo.snapshotTime,
 	}

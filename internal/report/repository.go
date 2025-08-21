@@ -18,12 +18,12 @@ import (
 const (
 	// CacheKey 是一个 Redis Hash 的键，用于缓存序列化后的用户报告。
 	// Field: 用户的UUID
-	// Value: UserReport 结构体的JSON序列化字符串
+	// Value: SpellUserReport 结构体的JSON序列化字符串
 	CacheKey = "report:cache"
 )
 
 // GetReportCache 从Redis缓存中获取用户报告。
-func GetReportCache(userID string) (*UserReport, error) {
+func GetReportCache(userID string) (*SpellUserReport, error) {
 	result, err := database.RDB.HGet(database.Ctx, CacheKey, userID).Result()
 	if err == redis.Nil {
 		return nil, nil // 缓存未命中，是正常情况，不返回错误
@@ -32,7 +32,7 @@ func GetReportCache(userID string) (*UserReport, error) {
 		return nil, err // 其他Redis错误
 	}
 
-	var report UserReport
+	var report SpellUserReport
 	if err := json.Unmarshal([]byte(result), &report); err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func GetReportCache(userID string) (*UserReport, error) {
 }
 
 // SetReportCache 将用户报告存入Redis缓存。
-func SetReportCache(report *UserReport, expire time.Duration) error {
+func SetReportCache(report *SpellUserReport, expire time.Duration) error {
 	data, err := json.Marshal(report)
 	if err != nil {
 		return err

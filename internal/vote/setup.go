@@ -4,11 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/lifecycle"
 )
+
+func ConfigureModule(mode config.AppMode) {
+	loadAlgorithmConsts(mode)
+	initHandlerMode(mode)
+}
 
 // initializeEloTracker 从Redis获取所有法术的ELO分数，并用它们来初始化全局的eloTracker。
 func initializeEloTracker() error {

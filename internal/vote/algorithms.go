@@ -1,6 +1,10 @@
 package vote
 
-import "math"
+import (
+	"math"
+
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
+)
 
 // --- 算法常量 ---
 
@@ -14,12 +18,35 @@ const (
 
 	// eloKFactor 是ELO算法中的K值，它决定了每次对战后分数变化的大小。
 	eloKFactor = 32
-
-	// rankScoreEloWeightBase 是计算归一化ELO分占比的基础值 (1.2)
-	rankScoreEloWeightBase = 1.2
-	// rankScoreEloWeightDecay 是计算归一化ELO分占比的衰减率 (0.01)
-	rankScoreEloWeightDecay = 0.01
 )
+
+const (
+	rankScoreEloWeightBaseForSpellMode = 1.2
+	rankScoreEloWeightDecayForSpellMode = 0.01
+)
+
+const (
+	rankScoreEloWeightBaseForPerkMode = 1.2
+	rankScoreEloWeightDecayForPerkMode = 0.0025
+)
+
+var (
+	// rankScoreEloWeightBase 是计算归一化ELO分占比的基础值
+	rankScoreEloWeightBase  float64
+	// rankScoreEloWeightDecay 是计算归一化ELO分占比的衰减率
+	rankScoreEloWeightDecay float64
+)
+
+func loadAlgorithmConsts(mode config.AppMode) {
+	switch mode {
+	case config.AppModeSpell:
+		rankScoreEloWeightBase = rankScoreEloWeightBaseForSpellMode
+		rankScoreEloWeightDecay = rankScoreEloWeightDecayForSpellMode
+	case config.AppModePerk:
+		rankScoreEloWeightBase = rankScoreEloWeightBaseForPerkMode
+		rankScoreEloWeightDecay = rankScoreEloWeightDecayForPerkMode
+	}
+}
 
 // --- Multiplier计算 ---
 

@@ -5,16 +5,32 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/database"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/pkg/token"
 	"github.com/gin-gonic/gin"
 )
 
+// --- 模式 ---
+var appMode config.AppMode
+
+func initHandlerMode(mode config.AppMode) {
+	appMode = mode
+}
+
 // SubmitVoteRequestBody 定义了前端提交投票时，请求体的JSON结构
-type SubmitVoteRequestBody struct {
+type SubmitSpellVoteRequestBody struct {
 	SpellAID  string     `json:"spellA" binding:"required"`
 	SpellBID  string     `json:"spellB" binding:"required"`
+	Result    VoteResult `json:"result" binding:"required"`
+	PairID    string     `json:"pairId" binding:"required"`
+	Signature string     `json:"signature" binding:"required"`
+}
+
+type SubmitPerkVoteRequestBody struct {
+	SpellAID  string     `json:"perkA" binding:"required"` // 改名
+	SpellBID  string     `json:"perkB" binding:"required"` // 改名
 	Result    VoteResult `json:"result" binding:"required"`
 	PairID    string     `json:"pairId" binding:"required"`
 	Signature string     `json:"signature" binding:"required"`
@@ -28,10 +44,20 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	var body SubmitVoteRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误: " + err.Error()})
-		return
+	var body SubmitSpellVoteRequestBody
+	switch appMode {
+	case config.AppModeSpell:
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误: " + err.Error()})
+			return
+		}
+	case config.AppModePerk:
+		var perkBody SubmitPerkVoteRequestBody
+		if err := c.ShouldBindJSON(&perkBody); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误: " + err.Error()})
+			return
+		}
+		body = SubmitSpellVoteRequestBody(perkBody)
 	}
 
 	// 2. 签名验证

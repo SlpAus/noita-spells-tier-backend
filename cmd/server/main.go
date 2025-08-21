@@ -33,6 +33,8 @@ func main() {
 	health.InitializeRunID()
 
 	// --- 3. 数据库和缓存初始化 ---
+	startup.ConfigureAppMode(cfg.App.Mode)
+
 	if err := startup.InitializeApplication(); err != nil {
 		panic(fmt.Sprintf("应用初始化失败，无法启动: %v", err))
 	}
@@ -73,10 +75,10 @@ func main() {
 	go health.StartRedisHealthCheck(healthHandle)
 
 	// --- 6. 创建并配置Web服务器 ---
-	gin.SetMode(cfg.Server.Mode)
+	gin.SetMode(string(cfg.Server.Mode))
 	r := gin.Default()
 
-	if cfg.Server.Mode != "release" {
+	if len(cfg.Server.Cors.AllowedOrigins) > 0 {
 		r.Use(cors.New(cors.Config{
 			AllowOrigins:     cfg.Server.Cors.AllowedOrigins,
 			AllowMethods:     []string{"GET", "POST", "OPTIONS"},
@@ -85,11 +87,18 @@ func main() {
 			AllowCredentials: true,
 			MaxAge:           12 * time.Hour,
 		}))
-
-		r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
 	}
 
-	api.SetupRoutes(r)
+	if cfg.Server.Mode != config.ServerModeRelease {
+		switch cfg.App.Mode {
+		case config.AppModeSpell:
+			r.Static("/images/spells", "./assets/data/ui_gfx/gun_actions")
+		case config.AppModePerk:
+			r.Static("/images/perks", "./assets/data/items_gfx/perks")
+		}
+	}
+
+	api.SetupRoutes(r, cfg.App)
 
 	server := &http.Server{
 		Addr:    cfg.Server.Address,

@@ -1,0 +1,31 @@
+# 服务器相关配置
+server:
+  # Gin框架运行模式: debug / release / test
+  mode: "debug"
+  # HTTP服务监听地址和端口
+  address: ":8081"
+  # 跨域配置
+  cors:
+    # 允许的前端域名列表
+    allowedOrigins:
+      - "http://localhost:3000"
+      - "http://127.0.0.1:3000"
+
+# 应用模式配置
+app:
+  # 运行模式: spell / perk
+  mode: "perk"
+
+# 数据库和缓存配置
+database:
+  # Redis 连接配置
+  redis:
+    address: "localhost:6379"
+    password: ""
+    db: 1
+  # SQLite 内存缓存配置
+  sqlite:
+    # 数据库文件名
+    fileName: "ranking_perks.db"
+    # 缓存最大值 (单位: KB)
+    maxCacheSizeKB: 262144

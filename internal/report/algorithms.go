@@ -5,40 +5,72 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
 )
 
 const (
-	// MinVotesForDecisionRate 是包含决断率字段所需的最小总投票数。
+	// 1.MinVotesForDecisionRate 是包含决断率字段所需的最小总投票数。
 	MinVotesForDecisionRate = 5
 
-	// MinWinsForTendency 是包含投票倾向相关字段所需的最小胜负投票数。
+	// 2.MinWinsForTendency 是包含投票倾向相关字段所需的最小胜负投票数。
 	MinWinsForTendency = 5
 
-	// MinWinsForMostChosen 是法术被计入“最常选择”所需的最小胜利次数。
+	// 3.MinWinsForMostChosen 是法术被计入“最常选择”所需的最小胜利次数。
 	MinWinsForMostChosen = 2
 
-	// TotalVotesToSpellsRatioForWinRate 是计算“最高胜率”法术的准入门槛，
-	// 用户的总投票数需要达到 (总法术数 * 这个倍数)。
-	TotalVotesToSpellsRatioForWinRate = 2.0
-
-	// MinTotalGamesForWinRate 是法术胜率被计算所需的最小有效场次。
-	MinTotalGamesForWinRate = 2
-
-	// MaxMilestones 是报告中最多显示的里程碑数量。
+	// 6.MaxMilestones 是报告中最多显示的里程碑数量。
 	MaxMilestones = 4
 
-	// MinVotesForBusiestDay 是计入“最肝的一天”所需的最小投票数。
+	// 7.MinVotesForBusiestDay 是计入“最肝的一天”所需的最小投票数。
 	MinVotesForBusiestDay = 5
-
-	// TopTierRatio 定义了被视为“顶级”法术的排名比例。
-	TopTierRatio = 0.025
-
-	// BottomTierRatio 定义了被视为“垫底”法术的排名比例。
-	BottomTierRatio = 0.025
 )
+
+const (
+	TotalVotesToSpellsRatioForWinRateForSpellMode = 2.0
+	MinTotalGamesForWinRateForSpellMode           = 2
+	TopTierRatioForSpellMode                      = 0.025
+	BottomTierRatioForSpellMode                   = 0.025
+)
+
+const (
+	TotalVotesToSpellsRatioForWinRateForPerkMode = 3.0
+	MinTotalGamesForWinRateForPerkMode           = 3
+	TopTierRatioForPerkMode                      = 0.05
+	BottomTierRatioForPerkMode                   = 0.05
+)
+
+var (
+	// 4.TotalVotesToSpellsRatioForWinRate 是计算“最高胜率”法术的准入门槛，
+	// 用户的总投票数需要达到 (总法术数 * 这个倍数)。
+	TotalVotesToSpellsRatioForWinRate float64
+
+	// 5.MinTotalGamesForWinRate 是法术胜率被计算所需的最小有效场次。
+	MinTotalGamesForWinRate int
+
+	// 8.TopTierRatio 定义了被视为“顶级”法术的排名比例。
+	TopTierRatio float64
+
+	// 9.BottomTierRatio 定义了被视为“垫底”法术的排名比例。
+	BottomTierRatio float64
+)
+
+func loadAlgorithmConsts(mode config.AppMode) {
+	switch mode {
+	case config.AppModeSpell:
+		TotalVotesToSpellsRatioForWinRate = TotalVotesToSpellsRatioForWinRateForSpellMode
+		MinTotalGamesForWinRate = MinTotalGamesForWinRateForSpellMode
+		TopTierRatio = TopTierRatioForSpellMode
+		BottomTierRatio = BottomTierRatioForSpellMode
+	case config.AppModePerk:
+		TotalVotesToSpellsRatioForWinRate = TotalVotesToSpellsRatioForWinRateForPerkMode
+		MinTotalGamesForWinRate = MinTotalGamesForWinRateForPerkMode
+		TopTierRatio = TopTierRatioForPerkMode
+		BottomTierRatio = BottomTierRatioForPerkMode
+	}
+}
 
 // milestoneNumbers 定义了我们关心的特定投票数里程碑。
 var milestoneNumbers = []int{25, 50, 100, 250, 500, 1000}
@@ -329,7 +361,7 @@ func calculateNemesis(spellWinRates map[string]float64, spellRankScore map[strin
 
 // calculateMostSubversiveVote 计算用户最具颠覆性的一票。
 // 即选择的胜者，其社区排名远低于败者。
-func calculateMostSubversiveVote(userVotes []userVoteRecord, spellRank map[string]int) (*HighlightVote, error) {
+func calculateMostSubversiveVote(userVotes []userVoteRecord, spellRank map[string]int) (*SpellHighlightVote, error) {
 	if spellRank == nil {
 		return nil, fmt.Errorf("spellRank 不能为nil")
 	}
@@ -378,7 +410,7 @@ func calculateMostSubversiveVote(userVotes []userVoteRecord, spellRank map[strin
 		return nil, err
 	}
 
-	return &HighlightVote{
+	return &SpellHighlightVote{
 		VoteNumber: subversiveVoteIndex + 1,
 		SpellA: SpellNameRank{
 			ID:   subversiveVote.SpellA_ID,
@@ -400,7 +432,7 @@ func truncateToDay(t time.Time) time.Time {
 }
 
 // calculateFirstVote 获取用户的第一次投票作为里程碑。
-func calculateFirstVote(userVotes []userVoteRecord) (*MilestoneVote, error) {
+func calculateFirstVote(userVotes []userVoteRecord) (*SpellMilestoneVote, error) {
 	if len(userVotes) == 0 {
 		return nil, nil
 	}
@@ -415,7 +447,7 @@ func calculateFirstVote(userVotes []userVoteRecord) (*MilestoneVote, error) {
 		return nil, err
 	}
 
-	return &MilestoneVote{
+	return &SpellMilestoneVote{
 		VoteNumber: 1,
 		SpellA:     SpellNameRank{ID: firstVote.SpellA_ID, Name: spellAName},
 		SpellB:     SpellNameRank{ID: firstVote.SpellB_ID, Name: spellBName},
@@ -425,8 +457,8 @@ func calculateFirstVote(userVotes []userVoteRecord) (*MilestoneVote, error) {
 }
 
 // calculateMilestones 根据定义的里程碑数字，从用户投票历史中提取里程碑事件。
-func calculateMilestones(userVotes []userVoteRecord) ([]MilestoneVote, error) {
-	var milestones []MilestoneVote
+func calculateMilestones(userVotes []userVoteRecord) ([]SpellMilestoneVote, error) {
+	var milestones []SpellMilestoneVote
 	totalUserVotes := len(userVotes)
 
 	// 筛选出用户已达成的里程碑
@@ -453,7 +485,7 @@ func calculateMilestones(userVotes []userVoteRecord) ([]MilestoneVote, error) {
 			return nil, err
 		}
 
-		milestones = append(milestones, MilestoneVote{
+		milestones = append(milestones, SpellMilestoneVote{
 			VoteNumber: m,
 			SpellA:     SpellNameRank{ID: voteRecord.SpellA_ID, Name: spellAName},
 			SpellB:     SpellNameRank{ID: voteRecord.SpellB_ID, Name: spellBName},
@@ -502,7 +534,7 @@ func calculateBusiestDay(userVotes []userVoteRecord) *ActivityRecord {
 }
 
 // calculateFirstEncounterTop 查找用户首次遇到顶级法术的投票。
-func calculateFirstEncounterTop(userVotes []userVoteRecord, spellRank map[string]int, rankToSpell []string) (*EncounterRecord, error) {
+func calculateFirstEncounterTop(userVotes []userVoteRecord, spellRank map[string]int, rankToSpell []string) (*SpellEncounterRecord, error) {
 	if spellRank == nil || rankToSpell == nil {
 		return nil, fmt.Errorf("传入的map或slice不能为nil")
 	}
@@ -528,7 +560,7 @@ func calculateFirstEncounterTop(userVotes []userVoteRecord, spellRank map[string
 			if err != nil {
 				return nil, err
 			}
-			return &EncounterRecord{
+			return &SpellEncounterRecord{
 				VoteNumber: i + 1,
 				SpellA:     SpellNameRank{ID: userVote.SpellA_ID, Name: spellAName, Rank: int64(spellRank[userVote.SpellA_ID])},
 				SpellB:     SpellNameRank{ID: userVote.SpellB_ID, Name: spellBName, Rank: int64(spellRank[userVote.SpellB_ID])},
@@ -544,7 +576,7 @@ func calculateFirstEncounterTop(userVotes []userVoteRecord, spellRank map[string
 }
 
 // calculateFirstEncounterBottom 查找用户首次遇到垫底法术的投票。
-func calculateFirstEncounterBottom(userVotes []userVoteRecord, spellRank map[string]int, rankToSpell []string) (*EncounterRecord, error) {
+func calculateFirstEncounterBottom(userVotes []userVoteRecord, spellRank map[string]int, rankToSpell []string) (*SpellEncounterRecord, error) {
 	if spellRank == nil || rankToSpell == nil {
 		return nil, fmt.Errorf("传入的map或slice不能为nil")
 	}
@@ -570,7 +602,7 @@ func calculateFirstEncounterBottom(userVotes []userVoteRecord, spellRank map[str
 			if err != nil {
 				return nil, err
 			}
-			return &EncounterRecord{
+			return &SpellEncounterRecord{
 				VoteNumber: i + 1,
 				SpellA:     SpellNameRank{ID: userVote.SpellA_ID, Name: spellAName, Rank: int64(spellRank[userVote.SpellA_ID])},
 				SpellB:     SpellNameRank{ID: userVote.SpellB_ID, Name: spellBName, Rank: int64(spellRank[userVote.SpellB_ID])},

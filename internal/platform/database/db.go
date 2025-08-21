@@ -21,7 +21,7 @@ func InitDB(cfg config.SqliteConfig) {
 
 	// 根据配置动态构建包含性能优化的DSN字符串
 	// cache_size单位是KiB，负值表示使用KiB。
-	dsn := fmt.Sprintf("file:ranking.db?journal_mode=WAL&cache=shared&cache_size=-%d", cfg.MaxCacheSizeKB)
+	dsn := fmt.Sprintf("file:%s?journal_mode=WAL&cache=shared&cache_size=-%d", cfg.FileName, cfg.MaxCacheSizeKB)
 
 	// GORM日志配置
 	newLogger := logger.New(

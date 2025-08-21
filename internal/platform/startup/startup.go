@@ -5,12 +5,23 @@ import (
 	"fmt"
 
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/backup"
+	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/config"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/platform/metadata"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/report"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/user"
 	"github.com/SlpAus/noita-spells-tier-backend/internal/vote"
 )
+
+func ConfigureAppMode(mode config.AppMode) {
+	fmt.Println("开始应用模式配置...")
+
+	spell.ConfigureModule(mode)
+	vote.ConfigureModule(mode)
+	report.ConfigureModule(mode)
+
+	fmt.Println("应用模式配置完成！")
+}
 
 // InitializeApplication 是应用首次启动时执行的总入口
 func InitializeApplication() error {

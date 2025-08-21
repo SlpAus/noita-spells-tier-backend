@@ -1,4 +1,7 @@
+# From Noita
 assets
+
+# Database files
 *.db
 
 # VSCode files
