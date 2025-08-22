@@ -15,6 +15,7 @@ import (
 	"github.com/SlpAus/noita-spells-tier-backend/internal/spell"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RawSpell 对应 spells_raw.json 中的原始数据结构
@@ -49,7 +50,12 @@ func loadTranslations(filePath string) (map[string]string, error) {
 			if value == "" {
 				value = record[1] // 备选第2列的英文文本
 			}
-			translations[key] = value
+
+			// 处理不规范的转义字符
+			if value != "" {
+				value = strings.ReplaceAll(value, "\\n", "\n")
+				translations[key] = value
+			}
 		}
 	}
 	fmt.Println("成功加载", len(translations), "条翻译。")
@@ -232,8 +238,36 @@ func cleanDatabase(dbCfg config.SqliteConfig) {
 	fmt.Printf("数据库清理完成！重置了 %d 条记录的分数。\n", result.RowsAffected)
 }
 
+// extendDatabase 保留数据库中的动态数据，使用处理好的数据更新静态字段或拓展新条目
+func extendDatabase(appCfg config.AppConfig, dbCfg config.SqliteConfig) {
+	fmt.Println("开始构建数据库...")
+	dbSpells, err := preprocessSpells(appCfg)
+	if err != nil {
+		log.Fatalf("预处理数据失败: %v", err)
+	}
+
+	database.InitDB(dbCfg)
+
+	database.DB.AutoMigrate(&spell.Spell{})
+
+	result := database.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "spell_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "description", "sprite", "type"}),
+	}).Create(&dbSpells)
+	if result.Error != nil {
+		log.Fatalf("向数据库更新数据失败: %v", result.Error)
+	}
+
+	switch appCfg.Mode {
+	case config.AppModeSpell:
+		fmt.Printf("数据库构建完成！成功更新 %d 条法术数据。\n", result.RowsAffected)
+	case config.AppModePerk:
+		fmt.Printf("数据库构建完成！成功更新 %d 条天赋数据。\n", result.RowsAffected)
+	}
+}
+
 func main() {
-	task := flag.String("task", "build", "要执行的任务: 'build' (构建并填充数据库) 或 'clean' (重置分数)")
+	task := flag.String("task", "build", "要执行的任务: 'build' (构建并填充数据库), 'clean' (重置分数), 或 'extend' (拓展数据库)")
 	flag.Parse()
 
 	config, err := config.LoadConfig()
@@ -246,9 +280,11 @@ func main() {
 		buildDatabase(config.App, config.Database.Sqlite)
 	case "clean":
 		cleanDatabase(config.Database.Sqlite)
+	case "extend":
+		extendDatabase(config.App, config.Database.Sqlite)
 	default:
 		fmt.Println("未知的任务:", *task)
-		fmt.Println("可用任务: 'build', 'clean'")
+		fmt.Println("可用任务: 'build', 'clean', 'extend'")
 		os.Exit(1)
 	}
 }
